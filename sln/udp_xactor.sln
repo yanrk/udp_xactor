@@ -1,0 +1,40 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 14
+VisualStudioVersion = 14.0.25420.1
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "udp_xactor", "udp_xactor.vcxproj", "{1E979751-78B0-4438-861E-3DC7BE8BF102}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		dll_debug|x64 = dll_debug|x64
+		dll_debug|x86 = dll_debug|x86
+		dll_release|x64 = dll_release|x64
+		dll_release|x86 = dll_release|x86
+		lib_debug|x64 = lib_debug|x64
+		lib_debug|x86 = lib_debug|x86
+		lib_release|x64 = lib_release|x64
+		lib_release|x86 = lib_release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1E979751-78B0-4438-861E-3DC7BE8BF102}.dll_debug|x64.ActiveCfg = dll_debug|x64
+		{1E979751-78B0-4438-861E-3DC7BE8BF102}.dll_debug|x64.Build.0 = dll_debug|x64
+		{1E979751-78B0-4438-861E-3DC7BE8BF102}.dll_debug|x86.ActiveCfg = dll_debug|Win32
+		{1E979751-78B0-4438-861E-3DC7BE8BF102}.dll_debug|x86.Build.0 = dll_debug|Win32
+		{1E979751-78B0-4438-861E-3DC7BE8BF102}.dll_release|x64.ActiveCfg = dll_release|x64
+		{1E979751-78B0-4438-861E-3DC7BE8BF102}.dll_release|x64.Build.0 = dll_release|x64
+		{1E979751-78B0-4438-861E-3DC7BE8BF102}.dll_release|x86.ActiveCfg = dll_release|Win32
+		{1E979751-78B0-4438-861E-3DC7BE8BF102}.dll_release|x86.Build.0 = dll_release|Win32
+		{1E979751-78B0-4438-861E-3DC7BE8BF102}.lib_debug|x64.ActiveCfg = lib_debug|x64
+		{1E979751-78B0-4438-861E-3DC7BE8BF102}.lib_debug|x64.Build.0 = lib_debug|x64
+		{1E979751-78B0-4438-861E-3DC7BE8BF102}.lib_debug|x86.ActiveCfg = lib_debug|Win32
+		{1E979751-78B0-4438-861E-3DC7BE8BF102}.lib_debug|x86.Build.0 = lib_debug|Win32
+		{1E979751-78B0-4438-861E-3DC7BE8BF102}.lib_release|x64.ActiveCfg = lib_release|x64
+		{1E979751-78B0-4438-861E-3DC7BE8BF102}.lib_release|x64.Build.0 = lib_release|x64
+		{1E979751-78B0-4438-861E-3DC7BE8BF102}.lib_release|x86.ActiveCfg = lib_release|Win32
+		{1E979751-78B0-4438-861E-3DC7BE8BF102}.lib_release|x86.Build.0 = lib_release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
