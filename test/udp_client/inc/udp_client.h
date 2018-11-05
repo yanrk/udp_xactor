@@ -16,31 +16,6 @@
 #include <thread>
 #include <vector>
 #include "udp_xactor.h"
-#include "cm256_codec.h"
-
-struct send_frame_t
-{
-    uint16_t                                frame_index;
-    uint8_t                                 frame_filter;
-
-    send_frame_t()
-        : frame_index(0)
-        , frame_filter(0)
-    {
-
-    }
-};
-
-struct recv_frame_t
-{
-    frames_t                                frames;
-
-    recv_frame_t()
-        : frames()
-    {
-
-    }
-};
 
 struct speed_data_t
 {
@@ -64,17 +39,11 @@ struct session_data_t
     uint64_t                                user_data;
     speed_data_t                            send_speed;
     speed_data_t                            recv_speed;
-    bool                                    need_codec;
-    send_frame_t                            send_frame;
-    recv_frame_t                            recv_frame;
 
     session_data_t()
         : user_data(0)
         , send_speed()
         , recv_speed()
-        , need_codec(false)
-        , send_frame()
-        , recv_frame()
     {
 
     }
@@ -87,7 +56,7 @@ public:
     virtual ~UdpTestClient() override;
 
 public:
-    bool init(const char * peer_ip, unsigned short peer_port, std::size_t thread_count, std::size_t connection_count, bool need_codec);
+    bool init(const char * peer_ip, unsigned short peer_port, std::size_t thread_count, std::size_t connection_count);
     void exit();
 
 public:
@@ -102,7 +71,6 @@ private:
 
 private:
     bool                                    m_running;
-    bool                                    m_need_codec;
     IUdpXactor                            * m_xactor;
     std::vector<std::thread>                m_thread_vector;
     std::map<socket_t, session_data_t>      m_user_data_map;
