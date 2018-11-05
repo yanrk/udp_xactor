@@ -67,7 +67,7 @@ public:
 public:
     virtual bool connect(const char * peer_ip, unsigned short peer_port, uint64_t user_data, const char * host_ip = "0.0.0.0", unsigned short host_port = 0, bool reuse_addr = true, bool reuse_port = true) = 0;
     virtual bool send(socket_t sockfd, const void * data, std::size_t data_len) = 0;
-    virtual void close(socket_t sockfd) = 0;
+    virtual bool close(socket_t sockfd) = 0;
 };
 
 UDP_CXX_API(bool) init_network();

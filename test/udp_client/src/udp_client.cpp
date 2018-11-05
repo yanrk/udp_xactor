@@ -20,6 +20,7 @@
 
 UdpTestClient::UdpTestClient()
     : m_running(false)
+    , m_need_codec(false)
     , m_xactor(nullptr)
     , m_thread_vector()
     , m_user_data_map()
@@ -33,13 +34,15 @@ UdpTestClient::~UdpTestClient()
     exit();
 }
 
-bool UdpTestClient::init(const char * peer_ip, unsigned short peer_port, std::size_t thread_count, std::size_t connection_count)
+bool UdpTestClient::init(const char * peer_ip, unsigned short peer_port, std::size_t thread_count, std::size_t connection_count, bool need_codec)
 {
     exit();
 
     do
     {
         m_running = true;
+
+        m_need_codec = need_codec;
 
         if (!init_network())
         {
@@ -120,6 +123,7 @@ void UdpTestClient::on_connect(socket_t sockfd, uint64_t user_data)
     std::lock_guard<std::mutex> locker(m_user_data_mutex);
     session_data_t & session_data = m_user_data_map[sockfd];
     session_data.user_data = user_data + 1;
+    session_data.need_codec = m_need_codec;
     std::cout << "connection [" << session_data.user_data << "] incoming" << std::endl;
     m_thread_vector.emplace_back(std::thread(std::bind(&UdpTestClient::send_data, this, sockfd)));
 }
@@ -197,16 +201,63 @@ bool UdpTestClient::send_data(socket_t sockfd)
         return (false);
     }
 
-    char data[1400] = { 0x0 };
-    std::size_t data_len = sizeof(data);
-    while (m_running && 0 != session_data->user_data)
+    if (session_data->need_codec)
     {
-        if (!m_xactor->send(sockfd, data, data_len))
+        srand(static_cast<uint32_t>(time(0)));
+
+        std::list<std::vector<uint8_t>> src_data_list;
+        for (std::size_t i = 0; i < 240; ++i)
         {
-            continue;
+            uint8_t buffer[1400] = { 0x0 };
+            for (std::size_t j = 0; j < sizeof(buffer); ++j)
+            {
+                buffer[j] = static_cast<uint8_t>(rand() % 256);
+            }
+            src_data_list.push_back(std::vector<uint8_t>(buffer, buffer + 1001 + rand() % 400));
         }
 
-        calc_speed(session_data->user_data, session_data->send_speed, false, data_len, m_user_data_mutex);
+        while (m_running && 0 != session_data->user_data)
+        {
+            std::list<std::vector<uint8_t>> tmp_data_list;
+
+            send_frame_t & send_frame = session_data->send_frame;
+            if (!cm256_encode(send_frame.frame_index, send_frame.frame_filter, tmp_data_list, src_data_list, 0.1, 0, true))
+            {
+                return (false);
+            }
+
+            while (tmp_data_list.size() > src_data_list.size() + 10)
+            {
+                tmp_data_list.pop_front();
+            }
+
+            std::list<std::vector<uint8_t>>::const_iterator iter = tmp_data_list.begin();
+            while (m_running && 0 != session_data->user_data && tmp_data_list.end() != iter)
+            {
+                const std::vector<uint8_t> & data = *iter++;
+
+                if (!m_xactor->send(sockfd, &data[0], data.size()))
+                {
+                    continue;
+                }
+
+                calc_speed(session_data->user_data, session_data->send_speed, false, data.size(), m_user_data_mutex);
+            }
+        }
+    }
+    else
+    {
+        char data[1400] = { 0x0 };
+        std::size_t data_len = sizeof(data);
+        while (m_running && 0 != session_data->user_data)
+        {
+            if (!m_xactor->send(sockfd, data, data_len))
+            {
+                continue;
+            }
+
+            calc_speed(session_data->user_data, session_data->send_speed, false, data_len, m_user_data_mutex);
+        }
     }
 
     {

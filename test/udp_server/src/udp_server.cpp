@@ -19,6 +19,7 @@
 
 UdpTestServer::UdpTestServer()
     : m_running(false)
+    , m_need_codec(false)
     , m_xactor(nullptr)
     , m_send_back(false)
     , m_session_index(0)
@@ -33,13 +34,15 @@ UdpTestServer::~UdpTestServer()
     exit();
 }
 
-bool UdpTestServer::init(const char * ip, uint16_t port, uint16_t thread_count, bool send_back)
+bool UdpTestServer::init(const char * ip, uint16_t port, uint16_t thread_count, bool need_codec, bool send_back)
 {
     exit();
 
     do
     {
         m_send_back = send_back;
+
+        m_need_codec = need_codec;
 
         m_session_index = 0;
 
@@ -93,6 +96,7 @@ void UdpTestServer::on_accept(socket_t sockfd)
     std::lock_guard<std::mutex> locker(m_user_data_mutex);
     session_data_t & session_data = m_user_data_map[sockfd];
     session_data.user_data = ++m_session_index;
+    session_data.need_codec = m_need_codec;
     std::cout << "connection [" << session_data.user_data << "] incoming" << std::endl;
 }
 
@@ -198,7 +202,21 @@ bool UdpTestServer::recv_data(socket_t sockfd, const void * data, std::size_t da
         return (false);
     }
 
-    calc_speed(session_data->user_data, session_data->recv_speed, true, data_len, m_user_data_mutex);
+    if (session_data->need_codec)
+    {
+        std::list<std::vector<uint8_t>> dst_data_list;
+        if (cm256_decode(data, data_len, session_data->recv_frame.frames, dst_data_list, 1000 * 15, false))
+        {
+            for (std::list<std::vector<uint8_t>>::const_iterator iter = dst_data_list.begin(); dst_data_list.end() != iter; ++iter)
+            {
+                calc_speed(session_data->user_data, session_data->recv_speed, true, iter->size(), m_user_data_mutex);
+            }
+        }
+    }
+    else
+    {
+        calc_speed(session_data->user_data, session_data->recv_speed, true, data_len, m_user_data_mutex);
+    }
 
     if (m_send_back)
     {

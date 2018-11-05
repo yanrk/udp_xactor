@@ -485,6 +485,7 @@ static bool remove_socket(std::mutex & sockfd_mutex, std::map<sockaddr_in_t, soc
         if (iter->second == sockfd)
         {
             udp_sink->on_close(sockfd);
+            udp_close(sockfd);
             sockfd_map.erase(iter);
             return (true);
         }
@@ -685,7 +686,6 @@ static void handle_recv(volatile bool & running, xactor_t xactor, std::mutex & s
                 RUN_LOG_ERR("iocp error: %d", net_error());
             }
             remove_socket(sockfd_mutex, sockfd_map, udp_sink, event->sockfd);
-            udp_close(event->sockfd);
             destroy_event(event);
         }
     }
@@ -830,152 +830,12 @@ static void handle_recv(volatile bool & running, xactor_t xactor, std::mutex & s
             {
                 delete_from_epoll(xactor, sockfd);
                 remove_socket(sockfd_mutex, sockfd_map, udp_sink, sockfd);
-                udp_close(sockfd);
             }
         }
     }
 }
 
 #endif // _MSC_VER
-
-static bool do_connect(volatile bool & running, xactor_t xactor, std::mutex & sockfd_mutex, std::map<sockaddr_in_t, socket_t> & sockfd_map, IUdpSink * udp_sink, socket_t connector, const sockaddr_in_t & peer_address, uint64_t user_data)
-{
-    if (!running || nullptr == udp_sink)
-    {
-        return (false);
-    }
-
-    if (!udp_set_block_switch(connector, true))
-    {
-        return (false);
-    }
-
-    if (!udp_set_recv_timeout(connector, 1000))
-    {
-        return (false);
-    }
-
-    sockaddr_in_t recv_address = { 0x0 };
-
-    for (std::size_t index = 0; index < 10; ++index)
-    {
-        std::size_t recv_size = 0;
-        if (udp_send(connector, peer_address, nullptr, 0) && udp_recv(connector, recv_address, nullptr, 0, recv_size) && 0 == memcmp(&peer_address.sin_addr, &recv_address.sin_addr, sizeof(in_address_t)))
-        {
-            break;
-        }
-    }
-
-    if (0 != memcmp(&peer_address.sin_addr, &recv_address.sin_addr, sizeof(in_address_t)))
-    {
-        return (false);
-    }
-
-    if (!udp_connect(connector, recv_address))
-    {
-        return (false);
-    }
-
-    if (!udp_set_recv_timeout(connector, 0))
-    {
-        return (false);
-    }
-    /*
-    if (!udp_set_block_switch(connector, false))
-    {
-        return (false);
-    }
-    */
-    sockaddr_in_t host_address = { 0x0 };
-    if (!udp_get_host_address(connector, host_address))
-    {
-        return (false);
-    }
-
-    if (!insert_socket(sockfd_mutex, sockfd_map, host_address, connector))
-    {
-        return (false);
-    }
-
-    udp_sink->on_connect(connector, user_data);
-
-    if (!append_to_xactor(xactor, connector))
-    {
-        remove_socket(sockfd_mutex, sockfd_map, udp_sink, connector);
-        return (false);
-    }
-
-    return (true);
-}
-
-static void do_accept(volatile bool & running, xactor_t xactor, std::mutex & sockfd_mutex, std::map<sockaddr_in_t, socket_t> & sockfd_map, IUdpSink * udp_sink, socket_t listener, sockaddr_in_t host_address)
-{
-    while (running)
-    {
-        sockaddr_in_t recv_address = { 0x0 };
-        std::size_t recv_size = 0;
-        if (!udp_recv(listener, recv_address, nullptr, 0, recv_size))
-        {
-            continue;
-        }
-
-        socket_t connector = BAD_SOCKET;
-        if (find_socket(sockfd_mutex, sockfd_map, recv_address, connector))
-        {
-            udp_send(connector, nullptr, 0);
-            continue;
-        }
-
-#ifdef _MSC_VER
-        if (!udp_open(connector))
-#else
-        if (!udp_bind(connector, host_address, true, true))
-#endif // _MSC_VER
-        {
-            continue;
-        }
-
-        do
-        {
-            if (!udp_connect(connector, recv_address))
-            {
-                break;
-            }
-
-            if (!udp_send(connector, nullptr, 0))
-            {
-                break;
-            }
-
-            if (!udp_set_recv_timeout(connector, 0))
-            {
-                break;
-            }
-            /*
-            if (!udp_set_block_switch(connector, false))
-            {
-                break;
-            }
-            */
-            if (!insert_socket(sockfd_mutex, sockfd_map, recv_address, connector))
-            {
-                break;
-            }
-
-            udp_sink->on_accept(connector);
-
-            if (!append_to_xactor(xactor, connector))
-            {
-                remove_socket(sockfd_mutex, sockfd_map, udp_sink, connector);
-                break;
-            }
-
-            connector = BAD_SOCKET;
-        } while (false);
-
-        udp_close(connector);
-    }
-}
 
 IUdpSink::~IUdpSink()
 {
@@ -1000,12 +860,16 @@ public:
 public:
     virtual bool connect(const char * peer_ip, unsigned short peer_port, uint64_t user_data, const char * host_ip, unsigned short host_port, bool reuse_addr, bool reuse_port) override;
     virtual bool send(socket_t sockfd, const void * data, std::size_t data_len) override;
-    virtual void close(socket_t sockfd) override;
+    virtual bool close(socket_t sockfd) override;
+
+private:
+    void accept();
 
 private:
     volatile bool                           m_running;
     xactor_t                                m_xactor;
     IUdpSink                              * m_udp_sink;
+    sockaddr_in_t                           m_address;
     socket_t                                m_listener;
     std::thread                             m_listen_thread;
     std::vector<std::thread>                m_recv_threads;
@@ -1019,13 +883,14 @@ UdpXactor::UdpXactor()
     : m_running(false)
     , m_xactor(BAD_XACTOR)
     , m_udp_sink(nullptr)
+    , m_address()
     , m_listener(BAD_SOCKET)
     , m_listen_thread()
     , m_recv_threads()
     , m_sockfd_map()
     , m_sockfd_mutex()
 {
-
+    memset(&m_address, 0x0, sizeof(m_address));
 }
 
 UdpXactor::~UdpXactor()
@@ -1061,14 +926,13 @@ bool UdpXactor::init(IUdpSink * udp_sink, std::size_t thread_count, const char *
             return (false);
         }
 
-        sockaddr_in_t host_address = { 0x0 };
-        if (!udp_get_host_address(m_listener, host_address))
+        if (!udp_get_host_address(m_listener, m_address))
         {
             RUN_LOG_ERR("udp xactor init failure while udp get host address failed");
             return (false);
         }
 
-        m_listen_thread = std::thread(std::bind(&do_accept, std::ref(m_running), std::ref(m_xactor), std::ref(m_sockfd_mutex), std::ref(m_sockfd_map), m_udp_sink, m_listener, host_address));
+        m_listen_thread = std::thread(std::bind(&UdpXactor::accept, this));
     }
 
 #ifdef _MSC_VER
@@ -1118,6 +982,74 @@ void UdpXactor::exit()
     }
 }
 
+void UdpXactor::accept()
+{
+    while (m_running)
+    {
+        sockaddr_in_t recv_address = { 0x0 };
+        std::size_t recv_size = 0;
+        if (!udp_recv(m_listener, recv_address, nullptr, 0, recv_size))
+        {
+            continue;
+        }
+
+        socket_t connector = BAD_SOCKET;
+        if (find_socket(m_sockfd_mutex, m_sockfd_map, recv_address, connector))
+        {
+            udp_send(connector, nullptr, 0);
+            continue;
+        }
+
+#ifdef _MSC_VER
+        if (!udp_open(connector))
+#else
+        if (!udp_bind(connector, m_address, true, true))
+#endif // _MSC_VER
+        {
+            continue;
+        }
+
+        do
+        {
+            if (!udp_connect(connector, recv_address))
+            {
+                break;
+            }
+
+            if (!udp_send(connector, nullptr, 0))
+            {
+                break;
+            }
+
+            if (!udp_set_recv_timeout(connector, 0))
+            {
+                break;
+            }
+            /*
+            if (!udp_set_block_switch(connector, false))
+            {
+                break;
+            }
+            */
+            if (!insert_socket(m_sockfd_mutex, m_sockfd_map, recv_address, connector))
+            {
+                break;
+            }
+
+            m_udp_sink->on_accept(connector);
+
+            if (!append_to_xactor(m_xactor, connector))
+            {
+                remove_socket(m_sockfd_mutex, m_sockfd_map, m_udp_sink, connector);
+            }
+
+            connector = BAD_SOCKET;
+        } while (false);
+
+        udp_close(connector);
+    }
+}
+
 bool UdpXactor::connect(const char * peer_ip, unsigned short peer_port, uint64_t user_data, const char * host_ip, unsigned short host_port, bool reuse_addr, bool reuse_port)
 {
     if (!m_running || nullptr == m_udp_sink)
@@ -1137,10 +1069,70 @@ bool UdpXactor::connect(const char * peer_ip, unsigned short peer_port, uint64_t
         return (false);
     }
 
-    if (do_connect(m_running, m_xactor, m_sockfd_mutex, m_sockfd_map, m_udp_sink, connector, peer_address, user_data))
+    do
     {
+        if (!udp_set_block_switch(connector, true))
+        {
+            break;
+        }
+
+        if (!udp_set_recv_timeout(connector, 1000))
+        {
+            break;
+        }
+
+        sockaddr_in_t recv_address = { 0x0 };
+
+        for (std::size_t index = 0; index < 10; ++index)
+        {
+            std::size_t recv_size = 0;
+            if (udp_send(connector, peer_address, nullptr, 0) && udp_recv(connector, recv_address, nullptr, 0, recv_size) && 0 == memcmp(&peer_address.sin_addr, &recv_address.sin_addr, sizeof(in_address_t)))
+            {
+                break;
+            }
+        }
+
+        if (0 != memcmp(&peer_address.sin_addr, &recv_address.sin_addr, sizeof(in_address_t)))
+        {
+            break;
+        }
+
+        if (!udp_connect(connector, recv_address))
+        {
+            break;
+        }
+
+        if (!udp_set_recv_timeout(connector, 0))
+        {
+            break;
+        }
+        /*
+        if (!udp_set_block_switch(connector, false))
+        {
+            break;
+        }
+        */
+        sockaddr_in_t host_address = { 0x0 };
+        if (!udp_get_host_address(connector, host_address))
+        {
+            break;
+        }
+
+        if (!insert_socket(m_sockfd_mutex, m_sockfd_map, host_address, connector))
+        {
+            break;
+        }
+
+        m_udp_sink->on_connect(connector, user_data);
+
+        if (!append_to_xactor(m_xactor, connector))
+        {
+            remove_socket(m_sockfd_mutex, m_sockfd_map, m_udp_sink, connector);
+            return (false);
+        }
+
         return (true);
-    }
+    } while (false);
 
     udp_close(connector);
 
@@ -1152,13 +1144,9 @@ bool UdpXactor::send(socket_t sockfd, const void * data, std::size_t data_len)
     return (udp_send(sockfd, reinterpret_cast<const char *>(data), data_len));
 }
 
-void UdpXactor::close(socket_t sockfd)
+bool UdpXactor::close(socket_t sockfd)
 {
-    if (BAD_SOCKET != sockfd)
-    {
-        remove_socket(m_sockfd_mutex, m_sockfd_map, m_udp_sink, sockfd);
-        udp_close(sockfd);
-    }
+    return (BAD_SOCKET != sockfd && remove_socket(m_sockfd_mutex, m_sockfd_map, m_udp_sink, sockfd));
 }
 
 IUdpXactor * create_udp_xactor()
