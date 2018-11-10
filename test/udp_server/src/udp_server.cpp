@@ -39,6 +39,8 @@ bool UdpTestServer::init(const char * ip, uint16_t port, uint16_t thread_count, 
 
     do
     {
+        m_running = true;
+
         m_send_back = send_back;
 
         m_session_index = 0;
