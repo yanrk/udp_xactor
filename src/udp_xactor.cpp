@@ -140,6 +140,18 @@ static bool transform_address(const char * ip, unsigned short port, sockaddr_in_
     return (::inet_pton(AF_INET, ip, &address.sin_addr) > 0);
 }
 
+static bool resolve_address(const sockaddr_in_t & address, std::string & ip, unsigned short & port)
+{
+    port = ntohs(address.sin_port);
+    char buffer[16] = { 0x0 };
+    if (nullptr == ::inet_ntop(AF_INET, const_cast<in_address_t *>(&address.sin_addr), buffer, sizeof(buffer)))
+    {
+        return (false);
+    }
+    ip = buffer;
+    return (true);
+}
+
 static bool udp_open(socket_t & sockfd)
 {
     sockfd = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -963,11 +975,22 @@ void UdpXactor::exit()
     {
         m_running = false;
 
-        udp_close(m_listener);
-
-        if (m_listen_thread.joinable())
+        if (BAD_SOCKET != m_listener)
         {
-            m_listen_thread.join();
+            std::string host_ip;
+            unsigned short host_port = 0;
+            resolve_address(m_address, host_ip, host_port);
+            socket_t sockfd = BAD_SOCKET;
+            udp_connect(sockfd, "0.0.0.0" == host_ip ? "127.0.0.1" : host_ip.c_str(), host_port, nullptr, 0, false, false);
+            udp_send(sockfd, nullptr, 0);
+            udp_close(sockfd);
+
+            if (m_listen_thread.joinable())
+            {
+                m_listen_thread.join();
+            }
+
+            udp_close(m_listener);
         }
 
         destroy_xactor(m_xactor, m_recv_threads.size());
@@ -991,6 +1014,11 @@ void UdpXactor::accept()
         if (!udp_recv(m_listener, recv_address, nullptr, 0, recv_size))
         {
             continue;
+        }
+
+        if (!m_running)
+        {
+            break;
         }
 
         socket_t connector = BAD_SOCKET;
