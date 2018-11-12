@@ -179,7 +179,7 @@ void calc_speed(uint64_t session_id, speed_data_t & speed_data, bool inbound, st
 
         {
             std::lock_guard<std::mutex> locker(mutex);
-            std::cout << "session (" << session_id << ") " << (inbound ? "recv" : "send") << " speed: " << speed << std::endl;
+            std::cout << "session (" << session_id << ") " << (inbound ? "recv" : "send") << " speed: " << speed << " count: " << speed_data.valid << "/" << speed_data.total << std::endl;
         }
     }
 }
@@ -206,11 +206,15 @@ bool UdpTestClient::send_data(socket_t sockfd)
             continue;
         }
 
+        session_data->send_speed.total += 1;
+        session_data->send_speed.valid += 1;
+
         calc_speed(session_data->user_data, session_data->send_speed, false, data_len, m_user_data_mutex);
     }
 
     {
         std::lock_guard<std::mutex> locker(m_user_data_mutex);
+        std::cout << "session (" << session_data->user_data << ") " << "send" << " count: " << session_data->send_speed.valid << "/" << session_data->send_speed.total << std::endl;
         m_user_data_map.erase(sockfd);
     }
 
@@ -229,6 +233,9 @@ bool UdpTestClient::recv_data(socket_t sockfd, const void * data, std::size_t da
     {
         return (false);
     }
+
+    session_data->recv_speed.total += 1;
+    session_data->recv_speed.valid += 1;
 
     calc_speed(session_data->user_data, session_data->recv_speed, true, data_len, m_user_data_mutex);
 

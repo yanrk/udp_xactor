@@ -113,6 +113,7 @@ void UdpTestServer::on_close(socket_t sockfd)
 {
     std::lock_guard<std::mutex> locker(m_user_data_mutex);
     session_data_t & session_data = m_user_data_map[sockfd];
+    std::cout << "session (" << session_data.user_data << ") " << "recv" << " count: " << session_data.recv_speed.valid << "/" << session_data.recv_speed.total << std::endl;
     std::cout << "connection [" << session_data.user_data << "] outgoing" << std::endl;
     m_user_data_map.erase(sockfd);
 }
@@ -159,7 +160,7 @@ void calc_speed(uint64_t session_id, speed_data_t & speed_data, bool inbound, st
 
         {
             std::lock_guard<std::mutex> locker(mutex);
-            std::cout << "session (" << session_id << ") " << (inbound ? "recv" : "send") << " speed: " << speed << std::endl;
+            std::cout << "session (" << session_id << ") " << (inbound ? "recv" : "send") << " speed: " << speed << " count: " << speed_data.valid << "/" << speed_data.total << std::endl;
         }
     }
 }
@@ -182,6 +183,9 @@ bool UdpTestServer::send_data(socket_t sockfd, const void * data, std::size_t da
         return (false);
     }
 
+    session_data->send_speed.total += 1;
+    session_data->send_speed.valid += 1;
+
     calc_speed(session_data->user_data, session_data->send_speed, false, data_len, m_user_data_mutex);
 
     return (true);
@@ -199,6 +203,9 @@ bool UdpTestServer::recv_data(socket_t sockfd, const void * data, std::size_t da
     {
         return (false);
     }
+
+    session_data->recv_speed.total += 1;
+    session_data->recv_speed.valid += 1;
 
     calc_speed(session_data->user_data, session_data->recv_speed, true, data_len, m_user_data_mutex);
 

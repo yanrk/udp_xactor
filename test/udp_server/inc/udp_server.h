@@ -22,12 +22,16 @@ struct speed_data_t
     std::chrono::system_clock::time_point   t1;
     uint64_t                                d;
     int                                     times;
+    uint64_t                                total;
+    uint64_t                                valid;
 
     speed_data_t()
         : t0(std::chrono::system_clock::now())
         , t1(t0)
         , d(0)
         , times(0)
+        , total(0)
+        , valid(0)
     {
 
     }
