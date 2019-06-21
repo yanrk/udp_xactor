@@ -22,16 +22,14 @@ struct speed_data_t
     std::chrono::system_clock::time_point   t1;
     uint64_t                                d;
     int                                     times;
-    uint64_t                                total;
-    uint64_t                                valid;
+    uint64_t                                count;
 
     speed_data_t()
         : t0(std::chrono::system_clock::now())
         , t1(t0)
         , d(0)
         , times(0)
-        , total(0)
-        , valid(0)
+        , count(0)
     {
 
     }
@@ -59,26 +57,27 @@ public:
     virtual ~UdpTestServer() override;
 
 public:
-    bool init(const char * ip, uint16_t port, uint16_t thread_count, bool send_back);
+    bool init(const char * ip, uint16_t port, uint16_t thread_count, bool use_fec, bool send_back);
     void exit();
 
 public:
-    virtual void on_accept(socket_t sockfd) override;
-    virtual void on_connect(socket_t sockfd, uint64_t user_data) override;
-    virtual void on_recv(socket_t sockfd, const void * data, std::size_t data_len) override;
-    virtual void on_close(socket_t sockfd) override;
+    virtual void on_accept(IUdpConnection * connection) override;
+    virtual void on_connect(IUdpConnection * connection, void * user_data) override;
+    virtual void on_recv(IUdpConnection * connection, const void * data, std::size_t size) override;
+    virtual void on_close(IUdpConnection * connection) override;
 
 private:
-    bool send_data(socket_t sockfd, const void * data, std::size_t data_len);
-    bool recv_data(socket_t sockfd, const void * data, std::size_t data_len);
+    bool send_data(IUdpConnection * connection, const void * data, std::size_t size);
+    bool recv_data(IUdpConnection * connection, const void * data, std::size_t size);
 
 private:
-    bool                                    m_running;
-    IUdpXactor                            * m_xactor;
-    bool                                    m_send_back;
-    std::atomic<uint64_t>                   m_session_index;
-    std::map<socket_t, session_data_t>      m_user_data_map;
-    std::mutex                              m_user_data_mutex;
+    bool                                            m_running;
+    bool                                            m_use_fec;
+    IUdpXactor                                    * m_xactor;
+    bool                                            m_send_back;
+    std::atomic<uint64_t>                           m_session_index;
+    std::map<IUdpConnection *, session_data_t>      m_user_data_map;
+    std::mutex                                      m_user_data_mutex;
 };
 
 

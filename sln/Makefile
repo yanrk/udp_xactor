@@ -9,8 +9,13 @@ project_home           = ..
 build_dir              = $(project_home)/sln
 bin_dir                = $(project_home)/lib/$(platform)
 object_dir             = $(project_home)/.objs
+cauchy_fec_home        = $(project_home)/../cauchy_fec
 
 
+
+# includes of cauchy_fec headers
+cauchy_fec_inc_path    = $(cauchy_fec_home)/inc
+cauchy_fec_includes    = -I$(cauchy_fec_inc_path)
 
 # includes of udp_xactor headers
 udp_xactor_inc_path    = $(project_home)/inc
@@ -19,7 +24,8 @@ udp_xactor_includes    = -I$(udp_xactor_inc_path)
 
 
 # all includes that udp_xactor solution needs
-includes               = $(udp_xactor_includes)
+includes               = $(cauchy_fec_includes)
+includes              += $(udp_xactor_includes)
 
 
 
@@ -34,8 +40,16 @@ udp_xactor_objects     = $(udp_xactor_source:$(project_home)%.cpp=$(object_dir)%
 
 
 
+# system libraries
+system_libs            = -lpthread
+
+# cauchy_fec libraries
+cauchy_fec_lib_inc     = $(cauchy_fec_home)/lib/$(platform)
+cauchy_fec_libs        = -L$(cauchy_fec_lib_inc) -lcauchy_fec
+
 # udp_xactor depends libraries
-udp_xactor_depends     = -lpthread
+udp_xactor_depends     = $(cauchy_fec_libs)
+udp_xactor_depends    += $(system_libs)
 
 
 

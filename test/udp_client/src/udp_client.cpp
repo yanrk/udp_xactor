@@ -9,6 +9,8 @@
 
 #include <ctime>
 #include <cstring>
+#include <list>
+#include <string>
 #include <chrono>
 #include <iostream>
 #include <functional>
@@ -20,6 +22,7 @@
 
 UdpTestClient::UdpTestClient()
     : m_running(false)
+    , m_use_fec(false)
     , m_xactor(nullptr)
     , m_thread_vector()
     , m_user_data_map()
@@ -33,13 +36,15 @@ UdpTestClient::~UdpTestClient()
     exit();
 }
 
-bool UdpTestClient::init(const char * peer_ip, unsigned short peer_port, std::size_t thread_count, std::size_t connection_count)
+bool UdpTestClient::init(const char * peer_ip, unsigned short peer_port, std::size_t thread_count, std::size_t connection_count, bool use_fec)
 {
     exit();
 
     do
     {
         m_running = true;
+
+        m_use_fec = use_fec;
 
         if (!init_network())
         {
@@ -54,7 +59,7 @@ bool UdpTestClient::init(const char * peer_ip, unsigned short peer_port, std::si
             break;
         }
 
-        if (!m_xactor->init(this, thread_count))
+        if (!m_xactor->init(this, use_fec, thread_count))
         {
             std::cout << "udp test client init failure while udp xactor init failed" << std::endl;
             break;
@@ -62,7 +67,7 @@ bool UdpTestClient::init(const char * peer_ip, unsigned short peer_port, std::si
 
         for (std::size_t connection_index = 0; connection_index < connection_count; ++connection_index)
         {
-            if (!m_xactor->connect(peer_ip, peer_port, connection_index))
+            if (!m_xactor->connect(peer_ip, peer_port, reinterpret_cast<void *>(connection_index)))
             {
                 std::cout << "udp test client init failure while udp xactor connect failed" << std::endl;
                 break;
@@ -109,30 +114,30 @@ void UdpTestClient::exit()
     }
 }
 
-void UdpTestClient::on_accept(socket_t sockfd)
+void UdpTestClient::on_accept(IUdpConnection * connection)
 {
     std::lock_guard<std::mutex> locker(m_user_data_mutex);
     std::cout << "invalid connection" << std::endl;
 }
 
-void UdpTestClient::on_connect(socket_t sockfd, uint64_t user_data)
+void UdpTestClient::on_connect(IUdpConnection * connection, void * user_data)
 {
     std::lock_guard<std::mutex> locker(m_user_data_mutex);
-    session_data_t & session_data = m_user_data_map[sockfd];
-    session_data.user_data = user_data + 1;
-    std::cout << "connection [" << session_data.user_data << "] incoming" << std::endl;
-    m_thread_vector.emplace_back(std::thread(std::bind(&UdpTestClient::send_data, this, sockfd)));
+    session_data_t & session_data = m_user_data_map[connection];
+    session_data.user_data = reinterpret_cast<uint64_t>(user_data) + 1;
+    std::cout << "connection [" << connection << "] incoming" << std::endl;
+    m_thread_vector.emplace_back(std::thread(std::bind(&UdpTestClient::send_data, this, connection)));
 }
 
-void UdpTestClient::on_recv(socket_t sockfd, const void * data, std::size_t data_len)
+void UdpTestClient::on_recv(IUdpConnection * connection, const void * data, std::size_t size)
 {
-    recv_data(sockfd, data, data_len);
+    recv_data(connection, data, size);
 }
 
-void UdpTestClient::on_close(socket_t sockfd)
+void UdpTestClient::on_close(IUdpConnection * connection)
 {
     std::lock_guard<std::mutex> locker(m_user_data_mutex);
-    session_data_t & session_data = m_user_data_map[sockfd];
+    session_data_t & session_data = m_user_data_map[connection];
     std::cout << "connection [" << session_data.user_data << "] outgoing" << std::endl;
     session_data.user_data = 0;
 }
@@ -179,17 +184,17 @@ void calc_speed(uint64_t session_id, speed_data_t & speed_data, bool inbound, st
 
         {
             std::lock_guard<std::mutex> locker(mutex);
-            std::cout << "session (" << session_id << ") " << (inbound ? "recv" : "send") << " speed: " << speed << " count: " << speed_data.valid << "/" << speed_data.total << std::endl;
+            std::cout << "session (" << session_id << ") " << (inbound ? "recv" : "send") << " speed: " << speed << " count: " << speed_data.count << std::endl;
         }
     }
 }
 
-bool UdpTestClient::send_data(socket_t sockfd)
+bool UdpTestClient::send_data(IUdpConnection * connection)
 {
     session_data_t * session_data = nullptr;
     {
         std::lock_guard<std::mutex> locker(m_user_data_mutex);
-        session_data = &m_user_data_map[sockfd];
+        session_data = &m_user_data_map[connection];
     }
 
     if (nullptr == session_data)
@@ -201,32 +206,31 @@ bool UdpTestClient::send_data(socket_t sockfd)
     std::size_t data_len = sizeof(data);
     while (m_running && 0 != session_data->user_data)
     {
-        if (!m_xactor->send(sockfd, data, data_len))
+        if (!m_xactor->send(connection, data, data_len))
         {
             continue;
         }
 
-        session_data->send_speed.total += 1;
-        session_data->send_speed.valid += 1;
+        session_data->send_speed.count += 1;
 
         calc_speed(session_data->user_data, session_data->send_speed, false, data_len, m_user_data_mutex);
     }
 
     {
         std::lock_guard<std::mutex> locker(m_user_data_mutex);
-        std::cout << "session (" << session_data->user_data << ") " << "send" << " count: " << session_data->send_speed.valid << "/" << session_data->send_speed.total << std::endl;
-        m_user_data_map.erase(sockfd);
+        std::cout << "session (" << session_data->user_data << ") " << "send" << " count: " << session_data->send_speed.count << std::endl;
+        m_user_data_map.erase(connection);
     }
 
     return (true);
 }
 
-bool UdpTestClient::recv_data(socket_t sockfd, const void * data, std::size_t data_len)
+bool UdpTestClient::recv_data(IUdpConnection * connection, const void * data, std::size_t size)
 {
     session_data_t * session_data = nullptr;
     {
     //  std::lock_guard<std::mutex> locker(m_user_data_mutex);
-        session_data = &m_user_data_map[sockfd];
+        session_data = &m_user_data_map[connection];
     }
 
     if (nullptr == session_data)
@@ -234,10 +238,9 @@ bool UdpTestClient::recv_data(socket_t sockfd, const void * data, std::size_t da
         return (false);
     }
 
-    session_data->recv_speed.total += 1;
-    session_data->recv_speed.valid += 1;
+    session_data->recv_speed.count += 1;
 
-    calc_speed(session_data->user_data, session_data->recv_speed, true, data_len, m_user_data_mutex);
+    calc_speed(session_data->user_data, session_data->recv_speed, true, size, m_user_data_mutex);
 
     return (true);
 }

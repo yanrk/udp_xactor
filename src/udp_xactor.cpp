@@ -1,10 +1,10 @@
 /********************************************************
  * Description : udp xactor
- * Author      : ryan
- * Email       : ryan@rayvision.com
- * Version     : 1.0
+ * Author      : yanrk
+ * Email       : yanrkchina@163.com
+ * Version     : 2.0
  * History     :
- * Copyright(C): RAYVISION
+ * Copyright(C): 2019-2020
  ********************************************************/
 
 #ifdef _MSC_VER
@@ -32,6 +32,7 @@
 #include <thread>
 #include <vector>
 
+#include "cauchy_fec.h"
 #include "udp_xactor.h"
 
 #ifdef _MSC_VER
@@ -63,6 +64,108 @@
 #endif // _MSC_VER
 
 #define RUN_LOG_ERR(fmt, ...) printf(fmt "\n", ##__VA_ARGS__)
+
+IUdpConnection::~IUdpConnection()
+{
+
+}
+
+class UdpConnection : public IUdpConnection
+{
+public:
+    UdpConnection(socket_t sockfd, void * user_data = nullptr);
+    virtual ~UdpConnection();
+
+public:
+    bool init(bool use_fec);
+    void exit();
+
+public:
+    virtual void set_user_data(void * user_data) override;
+    virtual void * get_user_data() override;
+
+public:
+    socket_t get_socket();
+
+public:
+    bool use_fec();
+
+public:
+    CauchyFecEncoder & get_fec_encoder();
+    CauchyFecDecoder & get_fec_decoder();
+
+private:
+    socket_t                m_sockfd;
+    void                  * m_user_data;
+
+private:
+    bool                    m_use_fec;
+    CauchyFecEncoder        m_fec_encoder;
+    CauchyFecDecoder        m_fec_decoder;
+};
+
+UdpConnection::UdpConnection(socket_t sockfd, void * user_data)
+    : m_sockfd(sockfd)
+    , m_user_data(user_data)
+    , m_use_fec(false)
+    , m_fec_encoder()
+    , m_fec_decoder()
+{
+
+}
+
+UdpConnection::~UdpConnection()
+{
+    exit();
+}
+
+bool UdpConnection::init(bool use_fec)
+{
+    m_use_fec = use_fec;
+    if (use_fec)
+    {
+        return (m_fec_encoder.init(1200, 0.05, true) && m_fec_decoder.init(15));
+    }
+    return (true);
+}
+
+void UdpConnection::exit()
+{
+    m_sockfd = BAD_SOCKET;
+    m_user_data = nullptr;
+    m_fec_encoder.exit();
+    m_fec_decoder.exit();
+}
+
+void UdpConnection::set_user_data(void * user_data)
+{
+    m_user_data = user_data;
+}
+
+void * UdpConnection::get_user_data()
+{
+    return (m_user_data);
+}
+
+socket_t UdpConnection::get_socket()
+{
+    return (m_sockfd);
+}
+
+bool UdpConnection::use_fec()
+{
+    return (m_use_fec);
+}
+
+CauchyFecEncoder & UdpConnection::get_fec_encoder()
+{
+    return (m_fec_encoder);
+}
+
+CauchyFecDecoder & UdpConnection::get_fec_decoder()
+{
+    return (m_fec_decoder);
+}
 
 #ifndef _MSC_VER
 typedef void sig_func(int);
@@ -163,12 +266,11 @@ static bool udp_open(socket_t & sockfd)
     return (true);
 }
 
-static void udp_close(socket_t & sockfd)
+static void udp_close(socket_t sockfd)
 {
     if (BAD_SOCKET != sockfd)
     {
         close_socket(sockfd);
-        sockfd = BAD_SOCKET;
     }
 }
 
@@ -234,6 +336,7 @@ static bool udp_bind(socket_t & sockfd, const sockaddr_in_t & host_address, bool
     } while (false);
 
     udp_close(sockfd);
+    sockfd = BAD_SOCKET;
 
     return (false);
 }
@@ -274,6 +377,7 @@ static bool udp_connect(socket_t & sockfd, const sockaddr_in_t & peer_address, c
     }
 
     udp_close(sockfd);
+    sockfd = BAD_SOCKET;
 
     return (false);
 }
@@ -462,13 +566,13 @@ static bool operator < (const sockaddr_in_t & lhs, const sockaddr_in_t & rhs)
     return (memcmp(&lhs, &rhs, sizeof(sockaddr_in_t)) < 0);
 }
 
-static bool find_socket(std::mutex & sockfd_mutex, const std::map<sockaddr_in_t, socket_t> & sockfd_map, const sockaddr_in_t & address, socket_t & sockfd)
+static bool find_socket(std::mutex & connection_mutex, const std::map<sockaddr_in_t, UdpConnection *> & connection_map, const sockaddr_in_t & address, socket_t & sockfd)
 {
-    std::lock_guard<std::mutex> locker(sockfd_mutex);
-    std::map<sockaddr_in_t, socket_t>::const_iterator iter = sockfd_map.find(address);
-    if (sockfd_map.end() != iter)
+    std::lock_guard<std::mutex> locker(connection_mutex);
+    std::map<sockaddr_in_t, UdpConnection *>::const_iterator iter = connection_map.find(address);
+    if (connection_map.end() != iter)
     {
-        sockfd = iter->second;
+        sockfd = iter->second->get_socket();
         return (true);
     }
     else
@@ -478,43 +582,119 @@ static bool find_socket(std::mutex & sockfd_mutex, const std::map<sockaddr_in_t,
     }
 }
 
-static bool insert_socket(std::mutex & sockfd_mutex, std::map<sockaddr_in_t, socket_t> & sockfd_map, const sockaddr_in_t & address, socket_t sockfd)
+static bool insert_connection(std::mutex & connection_mutex, std::map<sockaddr_in_t, UdpConnection *> & connection_map, const sockaddr_in_t & address, UdpConnection * connection)
 {
-    std::lock_guard<std::mutex> locker(sockfd_mutex);
-    if (sockfd_map.end() == sockfd_map.find(address))
+    std::lock_guard<std::mutex> locker(connection_mutex);
+    if (connection_map.end() == connection_map.find(address))
     {
-        sockfd_map[address] = sockfd;
+        connection_map[address] = connection;
         return (true);
     }
     return (false);
 }
 
-static bool remove_socket(std::mutex & sockfd_mutex, std::map<sockaddr_in_t, socket_t> & sockfd_map, IUdpSink * udp_sink, socket_t sockfd)
+static bool remove_connection(std::mutex & connection_mutex, std::map<sockaddr_in_t, UdpConnection *> & connection_map, IUdpSink * udp_sink, UdpConnection * connection)
 {
-    std::lock_guard<std::mutex> locker(sockfd_mutex);
-    for (std::map<sockaddr_in_t, socket_t>::iterator iter = sockfd_map.begin(); sockfd_map.end() != iter; ++iter)
+    std::lock_guard<std::mutex> locker(connection_mutex);
+    for (std::map<sockaddr_in_t, UdpConnection *>::iterator iter = connection_map.begin(); connection_map.end() != iter; ++iter)
     {
-        if (iter->second == sockfd)
+        if (iter->second->get_socket() == connection->get_socket())
         {
-            udp_sink->on_close(sockfd);
-            udp_close(sockfd);
-            sockfd_map.erase(iter);
+            udp_sink->on_close(connection);
+            udp_close(connection->get_socket());
+            connection_map.erase(iter);
+            delete connection;
             return (true);
         }
     }
     return (false);
 }
 
-static void clear_sockets(std::mutex & sockfd_mutex, std::map<sockaddr_in_t, socket_t> & sockfd_map, IUdpSink * udp_sink)
+static void clear_connections(std::mutex & connection_mutex, std::map<sockaddr_in_t, UdpConnection *> & connection_map, IUdpSink * udp_sink)
 {
-    std::lock_guard<std::mutex> locker(sockfd_mutex);
-    for (std::map<sockaddr_in_t, socket_t>::iterator iter = sockfd_map.begin(); sockfd_map.end() != iter; ++iter)
+    std::lock_guard<std::mutex> locker(connection_mutex);
+    for (std::map<sockaddr_in_t, UdpConnection *>::iterator iter = connection_map.begin(); connection_map.end() != iter; ++iter)
     {
-        socket_t sockfd = iter->second;
-        udp_sink->on_close(sockfd);
-        udp_close(sockfd);
+        UdpConnection * connection = iter->second;
+        udp_sink->on_close(connection);
+        udp_close(connection->get_socket());
+        delete connection;
     }
-    sockfd_map.clear();
+    connection_map.clear();
+}
+
+static bool handle_recv_data(UdpConnection * connection, const void * data, std::size_t size, IUdpSink * udp_sink)
+{
+    if (nullptr == connection || nullptr == data || nullptr == udp_sink)
+    {
+        return (false);
+    }
+
+    socket_t sockfd = connection->get_socket();
+    if (BAD_SOCKET == sockfd)
+    {
+        return (false);
+    }
+
+    if (connection->use_fec())
+    {
+        std::list<std::vector<uint8_t>> dst_list;
+        CauchyFecDecoder & fec_decoder = connection->get_fec_decoder();
+        if (!fec_decoder.decode(reinterpret_cast<const uint8_t *>(data), static_cast<uint32_t>(size), dst_list))
+        {
+            return (false);
+        }
+
+        for (std::list<std::vector<uint8_t>>::const_iterator iter = dst_list.begin(); dst_list.end() != iter; ++iter)
+        {
+            const std::vector<uint8_t> & piece = *iter;
+            udp_sink->on_recv(connection, reinterpret_cast<const char *>(&piece[0]), piece.size());
+        }
+    }
+    else
+    {
+        udp_sink->on_recv(connection, data, size);
+    }
+    return (true);
+}
+
+static bool handle_send_data(UdpConnection * connection, const void * data, std::size_t size)
+{
+    if (nullptr == connection || nullptr == data)
+    {
+        return (false);
+    }
+
+    socket_t sockfd = connection->get_socket();
+    if (BAD_SOCKET == sockfd)
+    {
+        return (false);
+    }
+
+    if (connection->use_fec())
+    {
+        std::list<std::vector<uint8_t>> dst_list;
+        CauchyFecEncoder & fec_encoder = connection->get_fec_encoder();
+        if (!fec_encoder.encode(reinterpret_cast<const uint8_t *>(data), static_cast<uint32_t>(size), dst_list))
+        {
+            return (false);
+        }
+
+        bool ret = !dst_list.empty();
+        for (std::list<std::vector<uint8_t>>::const_iterator iter = dst_list.begin(); dst_list.end() != iter; ++iter)
+        {
+            const std::vector<uint8_t> & piece = *iter;
+            if (!udp_send(sockfd, reinterpret_cast<const char *>(&piece[0]), piece.size()))
+            {
+                ret = false;
+            }
+        }
+        return (ret);
+    }
+    else
+    {
+        return (udp_send(sockfd, reinterpret_cast<const char *>(data), size));
+    }
 }
 
 #ifdef _MSC_VER
@@ -522,14 +702,18 @@ static void clear_sockets(std::mutex & sockfd_mutex, std::map<sockaddr_in_t, soc
 struct iocp_event_t
 {
     OVERLAPPED      overlapped;
-    socket_t        sockfd;
+    UdpConnection * connection;
     WSABUF          data;
     char            buffer[1600];
     std::size_t     buffer_size;
 };
 
-static bool create_event(socket_t sockfd, iocp_event_t *& event)
+static bool create_event(UdpConnection * connection, iocp_event_t *& event)
 {
+    if (nullptr == connection || BAD_SOCKET == connection->get_socket())
+    {
+        return (false);
+    }
     event = new iocp_event_t;
     if (nullptr == event)
     {
@@ -541,7 +725,7 @@ static bool create_event(socket_t sockfd, iocp_event_t *& event)
     event->buffer_size = sizeof(event->buffer) / sizeof(event->buffer[0]);
     event->data.buf = event->buffer;
     event->data.len = static_cast<ULONG>(event->buffer_size);
-    event->sockfd = sockfd;
+    event->connection = connection;
     return (true);
 }
 
@@ -549,7 +733,6 @@ static void destroy_event(iocp_event_t *& event)
 {
     if (nullptr != event)
     {
-    //  udp_close(event->sockfd);
         delete event;
         event = nullptr;
     }
@@ -577,11 +760,11 @@ static void destroy_iocp(HANDLE & iocp_handle)
 
 static bool append_to_iocp(HANDLE iocp_handle, iocp_event_t * event)
 {
-    if (nullptr == iocp_handle || nullptr == event || BAD_SOCKET == event->sockfd)
+    if (nullptr == iocp_handle || nullptr == event || nullptr == event->connection || BAD_SOCKET == event->connection->get_socket())
     {
         return (false);
     }
-    if (nullptr == ::CreateIoCompletionPort(reinterpret_cast<HANDLE>(event->sockfd), iocp_handle, reinterpret_cast<ULONG_PTR>(event), 0))
+    if (nullptr == ::CreateIoCompletionPort(reinterpret_cast<HANDLE>(event->connection->get_socket()), iocp_handle, reinterpret_cast<ULONG_PTR>(event), 0))
     {
         RUN_LOG_ERR("append to iocp failed: %d", net_error());
         return (false);
@@ -591,14 +774,14 @@ static bool append_to_iocp(HANDLE iocp_handle, iocp_event_t * event)
 
 static bool post_recv(iocp_event_t * event)
 {
-    if (nullptr == event || BAD_SOCKET == event->sockfd)
+    if (nullptr == event || nullptr == event->connection || BAD_SOCKET == event->connection->get_socket())
     {
         return (false);
     }
     WSABUF buffer_array[1] = { event->data };
     DWORD recv_len = 0;
     DWORD recv_flg = 0;
-    if (SOCKET_ERROR == ::WSARecv(event->sockfd, buffer_array, 1, &recv_len, &recv_flg, &event->overlapped, nullptr))
+    if (SOCKET_ERROR == ::WSARecv(event->connection->get_socket(), buffer_array, 1, &recv_len, &recv_flg, &event->overlapped, nullptr))
     {
         if (WSA_IO_PENDING != net_error())
         {
@@ -635,10 +818,15 @@ static void destroy_xactor(xactor_t & xactor, std::size_t handle_thread_count)
     destroy_iocp(xactor);
 }
 
-static bool append_to_xactor(xactor_t xactor, socket_t sockfd)
+static bool append_to_xactor(xactor_t xactor, UdpConnection * connection)
 {
+    if (nullptr == connection || BAD_SOCKET == connection->get_socket())
+    {
+        return (false);
+    }
+
     iocp_event_t * event = nullptr;
-    if (!create_event(sockfd, event))
+    if (!create_event(connection, event))
     {
         return (false);
     }
@@ -663,7 +851,7 @@ static bool append_to_xactor(xactor_t xactor, socket_t sockfd)
     return (false);
 }
 
-static void handle_recv(volatile bool & running, xactor_t xactor, std::mutex & sockfd_mutex, std::map<sockaddr_in_t, socket_t> & sockfd_map, IUdpSink * udp_sink)
+static void handle_recv(volatile bool & running, xactor_t xactor, std::mutex & connection_mutex, std::map<sockaddr_in_t, UdpConnection *> & connection_map, IUdpSink * udp_sink)
 {
     while (running)
     {
@@ -684,9 +872,9 @@ static void handle_recv(volatile bool & running, xactor_t xactor, std::mutex & s
 
         if (good)
         {
-            if (BAD_SOCKET != event->sockfd && 0 != data_len)
+            if (nullptr != event->connection && 0 != data_len)
             {
-                udp_sink->on_recv(event->sockfd, event->buffer, data_len);
+                handle_recv_data(event->connection, event->buffer, data_len, udp_sink);
             }
             good = post_recv(event);
         }
@@ -697,7 +885,7 @@ static void handle_recv(volatile bool & running, xactor_t xactor, std::mutex & s
             {
                 RUN_LOG_ERR("iocp error: %d", net_error());
             }
-            remove_socket(sockfd_mutex, sockfd_map, udp_sink, event->sockfd);
+            remove_connection(connection_mutex, connection_map, udp_sink, event->connection);
             destroy_event(event);
         }
     }
@@ -725,16 +913,16 @@ static void destroy_epoll(int & epoll_fd)
     }
 }
 
-static bool append_to_epoll(int epoll_fd, int fd)
+static bool append_to_epoll(int epoll_fd, UdpConnection * connection)
 {
-    if (-1 == epoll_fd || -1 == fd)
+    if (-1 == epoll_fd || nullptr == connection || BAD_SOCKET == connection->get_socket())
     {
         return (false);
     }
     struct epoll_event event = { 0x0 };
-    event.data.fd = fd;
+    event.data.ptr = connection;
     event.events = EPOLLIN | EPOLLET;
-    if (-1 == ::epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &event))
+    if (-1 == ::epoll_ctl(epoll_fd, EPOLL_CTL_ADD, connection->get_socket(), &event))
     {
         RUN_LOG_ERR("append to epoll failed: %d", net_error());
         return (false);
@@ -742,14 +930,14 @@ static bool append_to_epoll(int epoll_fd, int fd)
     return (true);
 }
 
-static bool delete_from_epoll(int epoll_fd, int fd)
+static bool delete_from_epoll(int epoll_fd, UdpConnection * connection)
 {
-    if (-1 == epoll_fd || -1 == fd)
+    if (-1 == epoll_fd || nullptr == connection || BAD_SOCKET == connection->get_socket())
     {
         return (false);
     }
     struct epoll_event event = { 0x0 };
-    if (-1 == ::epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, &event))
+    if (-1 == ::epoll_ctl(epoll_fd, EPOLL_CTL_DEL, connection->get_socket(), &event))
     {
         RUN_LOG_ERR("delete from epoll failed: %d", net_error());
         return (false);
@@ -757,16 +945,16 @@ static bool delete_from_epoll(int epoll_fd, int fd)
     return (true);
 }
 
-static bool post_recv(int epoll_fd, int fd)
+static bool post_recv(int epoll_fd, UdpConnection * connection)
 {
-    if (-1 == epoll_fd || -1 == fd)
+    if (-1 == epoll_fd || nullptr == connection || BAD_SOCKET == connection->get_socket())
     {
         return (false);
     }
     struct epoll_event event = { 0x0 };
-    event.data.fd = fd;
+    event.data.ptr = connection;
     event.events = EPOLLIN | EPOLLET;
-    if (-1 == ::epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &event))
+    if (-1 == ::epoll_ctl(epoll_fd, EPOLL_CTL_MOD, connection->get_socket(), &event))
     {
         RUN_LOG_ERR("post recv failed: %d", net_error());
         return (false);
@@ -784,12 +972,12 @@ static void destroy_xactor(xactor_t & xactor, std::size_t handle_thread_count)
     destroy_epoll(xactor);
 }
 
-static bool append_to_xactor(xactor_t xactor, socket_t sockfd)
+static bool append_to_xactor(xactor_t xactor, UdpConnection * connection)
 {
-    return (append_to_epoll(xactor, sockfd));
+    return (append_to_epoll(xactor, connection));
 }
 
-static void handle_recv(volatile bool & running, xactor_t xactor, std::mutex & sockfd_mutex, std::map<sockaddr_in_t, socket_t> & sockfd_map, IUdpSink * udp_sink)
+static void handle_recv(volatile bool & running, xactor_t xactor, std::mutex & connection_mutex, std::map<sockaddr_in_t, UdpConnection *> & connection_map, IUdpSink * udp_sink)
 {
     struct epoll_event event_array[256];
     const std::size_t max_event_count = sizeof(event_array) / sizeof(event_array[0]);
@@ -823,25 +1011,25 @@ static void handle_recv(volatile bool & running, xactor_t xactor, std::mutex & s
         {
             const struct epoll_event & event = event_array[index];
             uint32_t events = event.events;
-            socket_t sockfd = event.data.fd;
+            UdpConnection * connection = reinterpret_cast<UdpConnection *>(event.data.ptr);
             bool good = (0 == (events & EPOLLERR));
             if (good && (0 != (events & EPOLLIN)))
             {
                 char buffer[1600] = { 0x0 };
                 std::size_t recv_size = 0;
-                if (udp_recv(sockfd, buffer, sizeof(buffer), recv_size) && 0 != recv_size)
+                if (udp_recv(connection->get_socket(), buffer, sizeof(buffer), recv_size) && 0 != recv_size)
                 {
-                    udp_sink->on_recv(sockfd, buffer, recv_size);
+                    handle_recv_data(connection, buffer, recv_size, udp_sink);
                 }
-                if (!post_recv(xactor, sockfd))
+                if (!post_recv(xactor, connection))
                 {
                     good = false;
                 }
             }
             if (!good)
             {
-                delete_from_epoll(xactor, sockfd);
-                remove_socket(sockfd_mutex, sockfd_map, udp_sink, sockfd);
+                delete_from_epoll(xactor, connection);
+                remove_connection(connection_mutex, connection_map, udp_sink, connection);
             }
         }
     }
@@ -866,41 +1054,43 @@ public:
     virtual ~UdpXactor() override;
 
 public:
-    virtual bool init(IUdpSink * udp_sink, std::size_t thread_count, const char * host_ip, unsigned short host_port, bool reuse_addr, bool reuse_port) override;
+    virtual bool init(IUdpSink * udp_sink, bool use_fec, std::size_t thread_count, const char * host_ip, unsigned short host_port, bool reuse_addr, bool reuse_port) override;
     virtual void exit() override;
 
 public:
-    virtual bool connect(const char * peer_ip, unsigned short peer_port, uint64_t user_data, const char * host_ip, unsigned short host_port, bool reuse_addr, bool reuse_port) override;
-    virtual bool send(socket_t sockfd, const void * data, std::size_t data_len) override;
-    virtual bool close(socket_t sockfd) override;
+    virtual bool connect(const char * peer_ip, unsigned short peer_port, void * user_data, const char * host_ip, unsigned short host_port, bool reuse_addr, bool reuse_port) override;
+    virtual bool send(IUdpConnection * connection, const void * data, std::size_t size) override;
+    virtual bool close(IUdpConnection * connection) override;
 
 private:
     void accept();
 
 private:
-    volatile bool                           m_running;
-    xactor_t                                m_xactor;
-    IUdpSink                              * m_udp_sink;
-    sockaddr_in_t                           m_address;
-    socket_t                                m_listener;
-    std::thread                             m_listen_thread;
-    std::vector<std::thread>                m_recv_threads;
+    volatile bool                                       m_running;
+    bool                                                m_use_fec;
+    xactor_t                                            m_xactor;
+    IUdpSink                                          * m_udp_sink;
+    sockaddr_in_t                                       m_address;
+    socket_t                                            m_listener;
+    std::thread                                         m_listen_thread;
+    std::vector<std::thread>                            m_recv_threads;
 
 private:
-    std::map<sockaddr_in_t, socket_t>       m_sockfd_map;
-    std::mutex                              m_sockfd_mutex;
+    std::map<sockaddr_in_t, UdpConnection *>            m_connection_map;
+    std::mutex                                          m_connection_mutex;
 };
 
 UdpXactor::UdpXactor()
     : m_running(false)
+    , m_use_fec(false)
     , m_xactor(BAD_XACTOR)
     , m_udp_sink(nullptr)
     , m_address()
     , m_listener(BAD_SOCKET)
     , m_listen_thread()
     , m_recv_threads()
-    , m_sockfd_map()
-    , m_sockfd_mutex()
+    , m_connection_map()
+    , m_connection_mutex()
 {
     memset(&m_address, 0x0, sizeof(m_address));
 }
@@ -910,11 +1100,13 @@ UdpXactor::~UdpXactor()
     exit();
 }
 
-bool UdpXactor::init(IUdpSink * udp_sink, std::size_t thread_count, const char * host_ip, unsigned short host_port, bool reuse_addr, bool reuse_port)
+bool UdpXactor::init(IUdpSink * udp_sink, bool use_fec, std::size_t thread_count, const char * host_ip, unsigned short host_port, bool reuse_addr, bool reuse_port)
 {
     exit();
 
     m_running = true;
+
+    m_use_fec = use_fec;
 
     if (nullptr == udp_sink)
     {
@@ -963,7 +1155,7 @@ bool UdpXactor::init(IUdpSink * udp_sink, std::size_t thread_count, const char *
     m_recv_threads.reserve(thread_count);
     for (std::size_t thread_index = 0; thread_index < thread_count; ++thread_index)
     {
-        m_recv_threads.emplace_back(std::thread(std::bind(&handle_recv, std::ref(m_running), std::ref(m_xactor), std::ref(m_sockfd_mutex), std::ref(m_sockfd_map), m_udp_sink)));
+        m_recv_threads.emplace_back(std::thread(std::bind(&handle_recv, std::ref(m_running), std::ref(m_xactor), std::ref(m_connection_mutex), std::ref(m_connection_map), m_udp_sink)));
     }
 
     return (true);
@@ -984,6 +1176,7 @@ void UdpXactor::exit()
             udp_connect(sockfd, "0.0.0.0" == host_ip ? "127.0.0.1" : host_ip.c_str(), host_port, nullptr, 0, false, false);
             udp_send(sockfd, nullptr, 0);
             udp_close(sockfd);
+            sockfd = BAD_SOCKET;
 
             if (m_listen_thread.joinable())
             {
@@ -991,6 +1184,7 @@ void UdpXactor::exit()
             }
 
             udp_close(m_listener);
+            m_listener = BAD_SOCKET;
         }
 
         destroy_xactor(m_xactor, m_recv_threads.size());
@@ -1001,7 +1195,10 @@ void UdpXactor::exit()
         }
         m_recv_threads.clear();
 
-        clear_sockets(m_sockfd_mutex, m_sockfd_map, m_udp_sink);
+        clear_connections(m_connection_mutex, m_connection_map, m_udp_sink);
+
+        m_use_fec = false;
+        m_udp_sink = nullptr;
     }
 }
 
@@ -1022,7 +1219,7 @@ void UdpXactor::accept()
         }
 
         socket_t connector = BAD_SOCKET;
-        if (find_socket(m_sockfd_mutex, m_sockfd_map, recv_address, connector))
+        if (find_socket(m_connection_mutex, m_connection_map, recv_address, connector))
         {
             udp_send(connector, nullptr, 0);
             continue;
@@ -1036,6 +1233,8 @@ void UdpXactor::accept()
         {
             continue;
         }
+
+        UdpConnection * connection = nullptr;
 
         do
         {
@@ -1059,26 +1258,46 @@ void UdpXactor::accept()
                 break;
             }
             */
-            if (!insert_socket(m_sockfd_mutex, m_sockfd_map, recv_address, connector))
+
+            connection = new UdpConnection(connector);
+            if (nullptr == connection)
             {
                 break;
             }
 
-            m_udp_sink->on_accept(connector);
-
-            if (!append_to_xactor(m_xactor, connector))
+            if (!connection->init(m_use_fec))
             {
-                remove_socket(m_sockfd_mutex, m_sockfd_map, m_udp_sink, connector);
+                break;
             }
 
+            if (!insert_connection(m_connection_mutex, m_connection_map, recv_address, connection))
+            {
+                break;
+            }
+
+            m_udp_sink->on_accept(connection);
+
+            if (!append_to_xactor(m_xactor, connection))
+            {
+                remove_connection(m_connection_mutex, m_connection_map, m_udp_sink, connection);
+            }
+
+            connection = nullptr;
             connector = BAD_SOCKET;
         } while (false);
 
+        if (nullptr != connection)
+        {
+            delete connection;
+            connection = nullptr;
+        }
+
         udp_close(connector);
+        connector = BAD_SOCKET;
     }
 }
 
-bool UdpXactor::connect(const char * peer_ip, unsigned short peer_port, uint64_t user_data, const char * host_ip, unsigned short host_port, bool reuse_addr, bool reuse_port)
+bool UdpXactor::connect(const char * peer_ip, unsigned short peer_port, void * user_data, const char * host_ip, unsigned short host_port, bool reuse_addr, bool reuse_port)
 {
     if (!m_running || nullptr == m_udp_sink)
     {
@@ -1096,6 +1315,8 @@ bool UdpXactor::connect(const char * peer_ip, unsigned short peer_port, uint64_t
     {
         return (false);
     }
+
+    UdpConnection * connection = nullptr;
 
     do
     {
@@ -1146,35 +1367,53 @@ bool UdpXactor::connect(const char * peer_ip, unsigned short peer_port, uint64_t
             break;
         }
 
-        if (!insert_socket(m_sockfd_mutex, m_sockfd_map, host_address, connector))
+        connection = new UdpConnection(connector, user_data);
+        if (nullptr == connection)
         {
             break;
         }
 
-        m_udp_sink->on_connect(connector, user_data);
-
-        if (!append_to_xactor(m_xactor, connector))
+        if (!connection->init(m_use_fec))
         {
-            remove_socket(m_sockfd_mutex, m_sockfd_map, m_udp_sink, connector);
+            break;
+        }
+
+        if (!insert_connection(m_connection_mutex, m_connection_map, host_address, connection))
+        {
+            break;
+        }
+
+        m_udp_sink->on_connect(connection, user_data);
+
+        if (!append_to_xactor(m_xactor, connection))
+        {
+            remove_connection(m_connection_mutex, m_connection_map, m_udp_sink, connection);
             return (false);
         }
 
         return (true);
     } while (false);
 
+    if (nullptr != connection)
+    {
+        delete connection;
+        connection = nullptr;
+    }
+
     udp_close(connector);
+    connector = BAD_SOCKET;
 
     return (false);
 }
 
-bool UdpXactor::send(socket_t sockfd, const void * data, std::size_t data_len)
+bool UdpXactor::send(IUdpConnection * connection, const void * data, std::size_t size)
 {
-    return (udp_send(sockfd, reinterpret_cast<const char *>(data), data_len));
+    return (handle_send_data(reinterpret_cast<UdpConnection *>(connection), data, size));
 }
 
-bool UdpXactor::close(socket_t sockfd)
+bool UdpXactor::close(IUdpConnection * connection)
 {
-    return (BAD_SOCKET != sockfd && remove_socket(m_sockfd_mutex, m_sockfd_map, m_udp_sink, sockfd));
+    return (nullptr != connection && remove_connection(m_connection_mutex, m_connection_map, m_udp_sink, reinterpret_cast<UdpConnection *>(connection)));
 }
 
 IUdpXactor * create_udp_xactor()

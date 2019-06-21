@@ -1,10 +1,10 @@
 /********************************************************
  * Description : udp xactor
- * Author      : ryan
- * Email       : ryan@rayvision.com
- * Version     : 1.0
+ * Author      : yanrk
+ * Email       : yanrkchina@163.com
+ * Version     : 2.0
  * History     :
- * Copyright(C): RAYVISION
+ * Copyright(C): 2019-2020
  ********************************************************/
 
 #ifndef UDP_XACTOR_H
@@ -43,16 +43,26 @@
     typedef int32_t         socket_t;
 #endif // _MSC_VER
 
+class UDP_XACTOR_TYPE IUdpConnection
+{
+public:
+    virtual ~IUdpConnection() = 0;
+
+public:
+    virtual void set_user_data(void * user_data) = 0;
+    virtual void * get_user_data() = 0;
+};
+
 class UDP_XACTOR_TYPE IUdpSink
 {
 public:
     virtual ~IUdpSink() = 0;
 
 public:
-    virtual void on_accept(socket_t sockfd) = 0;
-    virtual void on_connect(socket_t sockfd, uint64_t user_data) = 0;
-    virtual void on_recv(socket_t sockfd, const void * data, std::size_t data_len) = 0;
-    virtual void on_close(socket_t sockfd) = 0;
+    virtual void on_accept(IUdpConnection * connection) = 0;
+    virtual void on_connect(IUdpConnection * connection, void * user_data) = 0;
+    virtual void on_recv(IUdpConnection * connection, const void * data, std::size_t size) = 0;
+    virtual void on_close(IUdpConnection * connection) = 0;
 };
 
 class UDP_XACTOR_TYPE IUdpXactor
@@ -61,13 +71,13 @@ public:
     virtual ~IUdpXactor() = 0;
 
 public:
-    virtual bool init(IUdpSink * udp_sink, std::size_t thread_count = 1, const char * host_ip = "0.0.0.0", unsigned short host_port = 0, bool reuse_addr = true, bool reuse_port = true) = 0;
+    virtual bool init(IUdpSink * udp_sink, bool use_fec, std::size_t thread_count = 1, const char * host_ip = "0.0.0.0", unsigned short host_port = 0, bool reuse_addr = true, bool reuse_port = true) = 0;
     virtual void exit() = 0;
 
 public:
-    virtual bool connect(const char * peer_ip, unsigned short peer_port, uint64_t user_data, const char * host_ip = "0.0.0.0", unsigned short host_port = 0, bool reuse_addr = true, bool reuse_port = true) = 0;
-    virtual bool send(socket_t sockfd, const void * data, std::size_t data_len) = 0;
-    virtual bool close(socket_t sockfd) = 0;
+    virtual bool connect(const char * peer_ip, unsigned short peer_port, void * user_data, const char * host_ip = "0.0.0.0", unsigned short host_port = 0, bool reuse_addr = true, bool reuse_port = true) = 0;
+    virtual bool send(IUdpConnection * connection, const void * data, std::size_t size) = 0;
+    virtual bool close(IUdpConnection * connection) = 0;
 };
 
 UDP_CXX_API(bool) init_network();
