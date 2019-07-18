@@ -11,68 +11,89 @@
 #define UDP_XACTOR_H
 
 
+#include <string>
+
 #ifdef _MSC_VER
-    #define UDP_XACTOR_CDECL             __cdecl
-    #define UDP_XACTOR_STDCALL           __stdcall
+    #define UDP_XACTOR_CDECL            __cdecl
+    #define UDP_XACTOR_STDCALL          __stdcall
     #ifdef EXPORT_UDP_XACTOR_DLL
-        #define UDP_XACTOR_TYPE          __declspec(dllexport)
+        #define UDP_XACTOR_API          __declspec(dllexport)
     #else
         #ifdef USE_UDP_XACTOR_DLL
-            #define UDP_XACTOR_TYPE      __declspec(dllimport)
+            #define UDP_XACTOR_API      __declspec(dllimport)
         #else
-            #define UDP_XACTOR_TYPE
+            #define UDP_XACTOR_API
         #endif // USE_UDP_XACTOR_DLL
     #endif // EXPORT_UDP_XACTOR_DLL
 #else
     #define UDP_XACTOR_CDECL
     #define UDP_XACTOR_STDCALL
-    #define UDP_XACTOR_TYPE
+    #define UDP_XACTOR_API
 #endif // _MSC_VER
 
-#define UDP_CXX_API(return_type) extern UDP_XACTOR_TYPE return_type UDP_XACTOR_CDECL
+namespace UdpXactor { // namespace UdpXactor begin
 
-class UDP_XACTOR_TYPE IUdpConnection
+struct UDP_XACTOR_API FecConfiguration
+{
+    bool            enable_fec;
+    uint32_t        fec_encode_max_block_size;     // 1200
+    double          fec_encode_recovery_rate;      // 0.05
+    bool            fec_encode_force_recovery;     // true
+    uint32_t        fec_decode_expire_millisecond; // 15
+};
+
+class UDP_XACTOR_API UdpConnectionBase
 {
 public:
-    virtual ~IUdpConnection() = 0;
+    virtual ~UdpConnectionBase() = 0;
 
 public:
     virtual void set_user_data(void * user_data) = 0;
     virtual void * get_user_data() = 0;
+
+public:
+    virtual void get_host_address(std::string & ip, unsigned short & port) = 0;
+    virtual void get_peer_address(std::string & ip, unsigned short & port) = 0;
 };
 
-class UDP_XACTOR_TYPE IUdpSink
+class UDP_XACTOR_API UdpServiceBase
 {
 public:
-    virtual ~IUdpSink() = 0;
+    virtual ~UdpServiceBase() = 0;
 
 public:
-    virtual void on_accept(IUdpConnection * connection) = 0;
-    virtual void on_connect(IUdpConnection * connection, void * user_data) = 0;
-    virtual void on_recv(IUdpConnection * connection, const void * data, std::size_t size) = 0;
-    virtual void on_close(IUdpConnection * connection) = 0;
+    virtual void on_accept(UdpConnectionBase * connection) = 0;
+    virtual void on_connect(UdpConnectionBase * connection, void * user_data) = 0;
+    virtual void on_recv(UdpConnectionBase * connection, const void * data, std::size_t size) = 0;
+    virtual void on_close(UdpConnectionBase * connection) = 0;
 };
 
-class UDP_XACTOR_TYPE IUdpXactor
+class UdpManagerImpl;
+
+class UDP_XACTOR_API UdpManager
 {
 public:
-    virtual ~IUdpXactor() = 0;
+    UdpManager();
+    ~UdpManager();
 
 public:
-    virtual bool init(IUdpSink * udp_sink, bool use_fec, std::size_t thread_count = 1, const char * host_ip = "0.0.0.0", unsigned short host_port = 0, bool reuse_addr = true, bool reuse_port = true) = 0;
-    virtual void exit() = 0;
+    UdpManager(const UdpManager &) = delete;
+    UdpManager & operator = (const UdpManager &) = delete;
 
 public:
-    virtual bool connect(const char * peer_ip, unsigned short peer_port, void * user_data, const char * host_ip = "0.0.0.0", unsigned short host_port = 0, bool reuse_addr = true, bool reuse_port = true) = 0;
-    virtual bool send(IUdpConnection * connection, const void * data, std::size_t size) = 0;
-    virtual bool close(IUdpConnection * connection) = 0;
+    virtual bool init(UdpServiceBase * udp_service, const FecConfiguration * fec, std::size_t thread_count = 1, const char * host_ip = "0.0.0.0", unsigned short host_port = 0, bool reuse_addr = true, bool reuse_port = true);
+    virtual void exit();
+
+public:
+    virtual bool connect(const char * peer_ip, unsigned short peer_port, void * user_data, const char * host_ip = "0.0.0.0", unsigned short host_port = 0, bool reuse_addr = true, bool reuse_port = true);
+    virtual bool send(UdpConnectionBase * connection, const void * data, std::size_t size);
+    virtual bool close(UdpConnectionBase * connection);
+
+private:
+    UdpManagerImpl                                * m_manager_impl;
 };
 
-UDP_CXX_API(bool) init_network();
-UDP_CXX_API(bool) exit_network();
-
-UDP_CXX_API(IUdpXactor *) create_udp_xactor();
-UDP_CXX_API(void) destroy_udp_xactor(IUdpXactor *);
+} // namespace UdpXactor end
 
 
 #endif // UDP_XACTOR_H

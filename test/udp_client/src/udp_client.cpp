@@ -22,13 +22,13 @@
 
 UdpTestClient::UdpTestClient()
     : m_running(false)
-    , m_use_fec(false)
-    , m_xactor(nullptr)
+    , m_fec()
+    , m_manager()
     , m_thread_vector()
     , m_user_data_map()
     , m_user_data_mutex()
 {
-
+    memset(&m_fec, 0x0, sizeof(m_fec));
 }
 
 UdpTestClient::~UdpTestClient()
@@ -44,32 +44,26 @@ bool UdpTestClient::init(const char * peer_ip, unsigned short peer_port, std::si
     {
         m_running = true;
 
-        m_use_fec = use_fec;
-
-        if (!init_network())
+        if (use_fec)
         {
-            std::cout << "udp test client init failure while network init failed" << std::endl;
-            break;
+            m_fec.enable_fec = true;
+            m_fec.fec_encode_max_block_size = 1200;
+            m_fec.fec_encode_recovery_rate = 0.05;
+            m_fec.fec_encode_force_recovery = true;
+            m_fec.fec_decode_expire_millisecond = 15;
         }
 
-        m_xactor = create_udp_xactor();
-        if (nullptr == m_xactor)
+        if (!m_manager.init(this, use_fec ? &m_fec : nullptr, thread_count))
         {
-            std::cout << "udp test client init failure while udp xactor create failed" << std::endl;
-            break;
-        }
-
-        if (!m_xactor->init(this, use_fec, thread_count))
-        {
-            std::cout << "udp test client init failure while udp xactor init failed" << std::endl;
+            std::cout << "udp test client init failure while udp manager init failed" << std::endl;
             break;
         }
 
         for (std::size_t connection_index = 0; connection_index < connection_count; ++connection_index)
         {
-            if (!m_xactor->connect(peer_ip, peer_port, reinterpret_cast<void *>(connection_index)))
+            if (!m_manager.connect(peer_ip, peer_port, reinterpret_cast<void *>(connection_index)))
             {
-                std::cout << "udp test client init failure while udp xactor connect failed" << std::endl;
+                std::cout << "udp test client init failure while udp manager connect failed" << std::endl;
                 break;
             }
         }
@@ -96,8 +90,7 @@ void UdpTestClient::exit()
     {
         m_running = false;
 
-        destroy_udp_xactor(m_xactor);
-        m_xactor = nullptr;
+        m_manager.exit();
 
         for (std::vector<std::thread>::iterator iter = m_thread_vector.begin(); m_thread_vector.end() != iter; ++iter)
         {
@@ -109,32 +102,30 @@ void UdpTestClient::exit()
         m_thread_vector.clear();
 
         m_user_data_map.clear();
-
-        exit_network();
     }
 }
 
-void UdpTestClient::on_accept(IUdpConnection * connection)
+void UdpTestClient::on_accept(UdpXactor::UdpConnectionBase * connection)
 {
     std::lock_guard<std::mutex> locker(m_user_data_mutex);
     std::cout << "invalid connection" << std::endl;
 }
 
-void UdpTestClient::on_connect(IUdpConnection * connection, void * user_data)
+void UdpTestClient::on_connect(UdpXactor::UdpConnectionBase * connection, void * user_data)
 {
     std::lock_guard<std::mutex> locker(m_user_data_mutex);
     session_data_t & session_data = m_user_data_map[connection];
     session_data.user_data = reinterpret_cast<uint64_t>(user_data) + 1;
-    std::cout << "connection [" << connection << "] incoming" << std::endl;
+    std::cout << "connection [" << session_data.user_data << "] incoming" << std::endl;
     m_thread_vector.emplace_back(std::thread(std::bind(&UdpTestClient::send_data, this, connection)));
 }
 
-void UdpTestClient::on_recv(IUdpConnection * connection, const void * data, std::size_t size)
+void UdpTestClient::on_recv(UdpXactor::UdpConnectionBase * connection, const void * data, std::size_t size)
 {
     recv_data(connection, data, size);
 }
 
-void UdpTestClient::on_close(IUdpConnection * connection)
+void UdpTestClient::on_close(UdpXactor::UdpConnectionBase * connection)
 {
     std::lock_guard<std::mutex> locker(m_user_data_mutex);
     session_data_t & session_data = m_user_data_map[connection];
@@ -189,7 +180,7 @@ void calc_speed(uint64_t session_id, speed_data_t & speed_data, bool inbound, st
     }
 }
 
-bool UdpTestClient::send_data(IUdpConnection * connection)
+bool UdpTestClient::send_data(UdpXactor::UdpConnectionBase * connection)
 {
     session_data_t * session_data = nullptr;
     {
@@ -206,7 +197,7 @@ bool UdpTestClient::send_data(IUdpConnection * connection)
     std::size_t data_len = sizeof(data);
     while (m_running && 0 != session_data->user_data)
     {
-        if (!m_xactor->send(connection, data, data_len))
+        if (!m_manager.send(connection, data, data_len))
         {
             continue;
         }
@@ -225,7 +216,7 @@ bool UdpTestClient::send_data(IUdpConnection * connection)
     return (true);
 }
 
-bool UdpTestClient::recv_data(IUdpConnection * connection, const void * data, std::size_t size)
+bool UdpTestClient::recv_data(UdpXactor::UdpConnectionBase * connection, const void * data, std::size_t size)
 {
     session_data_t * session_data = nullptr;
     {

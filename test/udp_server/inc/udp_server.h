@@ -50,7 +50,7 @@ struct session_data_t
     }
 };
 
-class UdpTestServer : public IUdpSink
+class UdpTestServer : public UdpXactor::UdpServiceBase
 {
 public:
     UdpTestServer();
@@ -61,23 +61,23 @@ public:
     void exit();
 
 public:
-    virtual void on_accept(IUdpConnection * connection) override;
-    virtual void on_connect(IUdpConnection * connection, void * user_data) override;
-    virtual void on_recv(IUdpConnection * connection, const void * data, std::size_t size) override;
-    virtual void on_close(IUdpConnection * connection) override;
+    virtual void on_accept(UdpXactor::UdpConnectionBase * connection) override;
+    virtual void on_connect(UdpXactor::UdpConnectionBase * connection, void * user_data) override;
+    virtual void on_recv(UdpXactor::UdpConnectionBase * connection, const void * data, std::size_t size) override;
+    virtual void on_close(UdpXactor::UdpConnectionBase * connection) override;
 
 private:
-    bool send_data(IUdpConnection * connection, const void * data, std::size_t size);
-    bool recv_data(IUdpConnection * connection, const void * data, std::size_t size);
+    bool send_data(UdpXactor::UdpConnectionBase * connection, const void * data, std::size_t size);
+    bool recv_data(UdpXactor::UdpConnectionBase * connection, const void * data, std::size_t size);
 
 private:
-    bool                                            m_running;
-    bool                                            m_use_fec;
-    IUdpXactor                                    * m_xactor;
-    bool                                            m_send_back;
-    std::atomic<uint64_t>                           m_session_index;
-    std::map<IUdpConnection *, session_data_t>      m_user_data_map;
-    std::mutex                                      m_user_data_mutex;
+    bool                                                        m_running;
+    UdpXactor::FecConfiguration                                 m_fec;
+    UdpXactor::UdpManager                                       m_manager;
+    bool                                                        m_send_back;
+    std::atomic<uint64_t>                                       m_session_index;
+    std::map<UdpXactor::UdpConnectionBase *, session_data_t>    m_user_data_map;
+    std::mutex                                                  m_user_data_mutex;
 };
 
 

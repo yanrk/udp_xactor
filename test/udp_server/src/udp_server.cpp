@@ -19,14 +19,14 @@
 
 UdpTestServer::UdpTestServer()
     : m_running(false)
-    , m_use_fec(false)
-    , m_xactor(nullptr)
+    , m_fec()
+    , m_manager()
     , m_send_back(false)
     , m_session_index(0)
     , m_user_data_map()
     , m_user_data_mutex()
 {
-
+    memset(&m_fec, 0x0, sizeof(m_fec));
 }
 
 UdpTestServer::~UdpTestServer()
@@ -44,26 +44,20 @@ bool UdpTestServer::init(const char * ip, uint16_t port, uint16_t thread_count, 
 
         m_send_back = send_back;
 
-        m_use_fec = use_fec;
-
         m_session_index = 0;
 
-        if (!init_network())
+        if (use_fec)
         {
-            std::cout << "udp test server init failure while network init failed" << std::endl;
-            break;
+            m_fec.enable_fec = true;
+            m_fec.fec_encode_max_block_size = 1200;
+            m_fec.fec_encode_recovery_rate = 0.05;
+            m_fec.fec_encode_force_recovery = true;
+            m_fec.fec_decode_expire_millisecond = 15;
         }
 
-        m_xactor = create_udp_xactor();
-        if (nullptr == m_xactor)
+        if (!m_manager.init(this, use_fec ? &m_fec : nullptr, thread_count, ip, port, true, true))
         {
-            std::cout << "udp test server init failure while udp xactor create failed" << std::endl;
-            break;
-        }
-
-        if (!m_xactor->init(this, use_fec, thread_count, ip, port, true, true))
-        {
-            std::cout << "udp test server init failure while udp xactor init failed" << std::endl;
+            std::cout << "udp test server init failure while udp manager init failed" << std::endl;
             break;
         }
 
@@ -84,16 +78,13 @@ void UdpTestServer::exit()
     {
         m_running = false;
 
-        destroy_udp_xactor(m_xactor);
-        m_xactor = nullptr;
+        m_manager.exit();
 
         m_user_data_map.clear();
-
-        exit_network();
     }
 }
 
-void UdpTestServer::on_accept(IUdpConnection * connection)
+void UdpTestServer::on_accept(UdpXactor::UdpConnectionBase * connection)
 {
     std::lock_guard<std::mutex> locker(m_user_data_mutex);
     session_data_t & session_data = m_user_data_map[connection];
@@ -101,18 +92,18 @@ void UdpTestServer::on_accept(IUdpConnection * connection)
     std::cout << "connection [" << session_data.user_data << "] incoming" << std::endl;
 }
 
-void UdpTestServer::on_connect(IUdpConnection * connection, void * user_data)
+void UdpTestServer::on_connect(UdpXactor::UdpConnectionBase * connection, void * user_data)
 {
     std::lock_guard<std::mutex> locker(m_user_data_mutex);
     std::cout << "invalid connection" << std::endl;
 }
 
-void UdpTestServer::on_recv(IUdpConnection * connection, const void * data, std::size_t size)
+void UdpTestServer::on_recv(UdpXactor::UdpConnectionBase * connection, const void * data, std::size_t size)
 {
     recv_data(connection, data, size);
 }
 
-void UdpTestServer::on_close(IUdpConnection * connection)
+void UdpTestServer::on_close(UdpXactor::UdpConnectionBase * connection)
 {
     std::lock_guard<std::mutex> locker(m_user_data_mutex);
     session_data_t & session_data = m_user_data_map[connection];
@@ -168,7 +159,7 @@ void calc_speed(uint64_t session_id, speed_data_t & speed_data, bool inbound, st
     }
 }
 
-bool UdpTestServer::send_data(IUdpConnection * connection, const void * data, std::size_t size)
+bool UdpTestServer::send_data(UdpXactor::UdpConnectionBase * connection, const void * data, std::size_t size)
 {
     session_data_t * session_data = nullptr;
     {
@@ -181,7 +172,7 @@ bool UdpTestServer::send_data(IUdpConnection * connection, const void * data, st
         return (false);
     }
 
-    if (!m_xactor->send(connection, data, size))
+    if (!m_manager.send(connection, data, size))
     {
         return (false);
     }
@@ -193,7 +184,7 @@ bool UdpTestServer::send_data(IUdpConnection * connection, const void * data, st
     return (true);
 }
 
-bool UdpTestServer::recv_data(IUdpConnection * connection, const void * data, std::size_t size)
+bool UdpTestServer::recv_data(UdpXactor::UdpConnectionBase * connection, const void * data, std::size_t size)
 {
     session_data_t * session_data = nullptr;
     {

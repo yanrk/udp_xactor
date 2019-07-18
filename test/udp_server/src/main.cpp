@@ -14,7 +14,7 @@
 int main(int, char * [])
 {
     UdpTestServer server;
-    if (!server.init("0.0.0.0", 54321, 1, false, false))
+    if (!server.init("0.0.0.0", 54321, 1, true, true))
     {
         return (1);
     }

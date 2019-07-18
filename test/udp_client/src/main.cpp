@@ -15,7 +15,7 @@ int main(int, char * [])
 {
     UdpTestClient client;
 
-    if (!client.init("127.0.0.1", 54321, 1, 1, false))
+    if (!client.init("127.0.0.1", 54321, 1, 1, true))
     {
         return (1);
     }
