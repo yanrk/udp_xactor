@@ -31,18 +31,6 @@
 
 #define UDP_CXX_API(return_type) extern UDP_XACTOR_TYPE return_type UDP_XACTOR_CDECL
 
-#include <cstdint>
-
-#ifdef _MSC_VER
-    #ifdef _WIN64
-        typedef uint64_t    socket_t;
-    #else
-        typedef uint32_t    socket_t;
-    #endif // _WIN64
-#else
-    typedef int32_t         socket_t;
-#endif // _MSC_VER
-
 class UDP_XACTOR_TYPE IUdpConnection
 {
 public:
