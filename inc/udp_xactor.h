@@ -81,13 +81,13 @@ public:
     UdpManager & operator = (const UdpManager &) = delete;
 
 public:
-    virtual bool init(UdpServiceBase * udp_service, const FecConfiguration * fec, std::size_t thread_count = 1, const char * host_ip = "0.0.0.0", unsigned short host_port = 0, bool reuse_addr = true, bool reuse_port = true);
-    virtual void exit();
+    bool init(UdpServiceBase * udp_service, const FecConfiguration * fec, std::size_t thread_count = 1, const char * host_ip = "0.0.0.0", unsigned short host_port = 0, bool reuse_addr = true, bool reuse_port = true);
+    void exit();
 
 public:
-    virtual bool connect(const char * peer_ip, unsigned short peer_port, void * user_data, const char * host_ip = "0.0.0.0", unsigned short host_port = 0, bool reuse_addr = true, bool reuse_port = true);
-    virtual bool send(UdpConnectionBase * connection, const void * data, std::size_t size);
-    virtual bool close(UdpConnectionBase * connection);
+    bool connect(const char * peer_ip, unsigned short peer_port, void * user_data, const char * host_ip = "0.0.0.0", unsigned short host_port = 0, bool reuse_addr = true, bool reuse_port = true);
+    bool send(UdpConnectionBase * connection, const void * data, std::size_t size);
+    bool close(UdpConnectionBase * connection);
 
 private:
     UdpManagerImpl                                * m_manager_impl;
