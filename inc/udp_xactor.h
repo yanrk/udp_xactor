@@ -62,8 +62,8 @@ public:
     virtual ~UdpServiceBase() = 0;
 
 public:
-    virtual void on_accept(UdpConnectionBase * connection, void * user_data) = 0;
     virtual void on_listen(UdpConnectionBase * connection, void * user_data) = 0;
+    virtual void on_accept(UdpConnectionBase * connection, void * user_data) = 0;
     virtual void on_connect(UdpConnectionBase * connection, void * user_data) = 0;
     virtual void on_recv(UdpConnectionBase * connection, const void * data, std::size_t size) = 0;
     virtual void on_close(UdpConnectionBase * connection) = 0;
