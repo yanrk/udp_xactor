@@ -62,7 +62,8 @@ public:
     virtual ~UdpServiceBase() = 0;
 
 public:
-    virtual void on_accept(UdpConnectionBase * connection) = 0;
+    virtual void on_accept(UdpConnectionBase * connection, void * user_data) = 0;
+    virtual void on_listen(UdpConnectionBase * connection, void * user_data) = 0;
     virtual void on_connect(UdpConnectionBase * connection, void * user_data) = 0;
     virtual void on_recv(UdpConnectionBase * connection, const void * data, std::size_t size) = 0;
     virtual void on_close(UdpConnectionBase * connection) = 0;
@@ -81,10 +82,12 @@ public:
     UdpManager & operator = (const UdpManager &) = delete;
 
 public:
-    bool init(UdpServiceBase * udp_service, const FecConfiguration * fec, std::size_t thread_count = 1, const char * host_ip = "0.0.0.0", unsigned short host_port = 0, bool reuse_addr = true, bool reuse_port = true);
+    bool init(UdpServiceBase * udp_service, const FecConfiguration * fec, std::size_t thread_count = 1);
     void exit();
 
 public:
+    bool listen(const char * host_ip, unsigned short host_port, void * user_data, bool one_to_one, bool reuse_addr = true, bool reuse_port = true); /* work use same host port, 1 <---> 1 OR 1 <---> N */
+    bool accept(const char * host_ip, unsigned short host_port, void * user_data, bool reuse_addr = true, bool reuse_port = true); /* work use different host port, N <---> N */
     bool connect(const char * peer_ip, unsigned short peer_port, void * user_data, const char * host_ip = "0.0.0.0", unsigned short host_port = 0, bool reuse_addr = true, bool reuse_port = true);
     bool send(UdpConnectionBase * connection, const void * data, std::size_t size);
     bool close(UdpConnectionBase * connection);

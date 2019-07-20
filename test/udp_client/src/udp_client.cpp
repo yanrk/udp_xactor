@@ -105,7 +105,13 @@ void UdpTestClient::exit()
     }
 }
 
-void UdpTestClient::on_accept(UdpXactor::UdpConnectionBase * connection)
+void UdpTestClient::on_listen(UdpXactor::UdpConnectionBase * connection, void * user_data)
+{
+    std::lock_guard<std::mutex> locker(m_user_data_mutex);
+    std::cout << "invalid connection" << std::endl;
+}
+
+void UdpTestClient::on_accept(UdpXactor::UdpConnectionBase * connection, void * user_data)
 {
     std::lock_guard<std::mutex> locker(m_user_data_mutex);
     std::cout << "invalid connection" << std::endl;

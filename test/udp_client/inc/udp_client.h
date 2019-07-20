@@ -62,7 +62,8 @@ public:
     void exit();
 
 public:
-    virtual void on_accept(UdpXactor::UdpConnectionBase * connection) override;
+    virtual void on_listen(UdpXactor::UdpConnectionBase * connection, void * user_data) override;
+    virtual void on_accept(UdpXactor::UdpConnectionBase * connection, void * user_data) override;
     virtual void on_connect(UdpXactor::UdpConnectionBase * connection, void * user_data) override;
     virtual void on_recv(UdpXactor::UdpConnectionBase * connection, const void * data, std::size_t size) override;
     virtual void on_close(UdpXactor::UdpConnectionBase * connection) override;

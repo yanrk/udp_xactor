@@ -28,6 +28,7 @@
 #include <cstring>
 
 #include <map>
+#include <list>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -70,6 +71,11 @@ static bool operator < (const sockaddr_in_t & lhs, const sockaddr_in_t & rhs)
     return (memcmp(&lhs, &rhs, sizeof(sockaddr_in_t)) < 0);
 }
 
+static bool operator == (const sockaddr_in_t & lhs, const sockaddr_in_t & rhs)
+{
+    return (0 == memcmp(&lhs, &rhs, sizeof(sockaddr_in_t)));
+}
+
 namespace UdpXactor { // namespace UdpXactor begin
 
 UdpConnectionBase::~UdpConnectionBase()
@@ -80,12 +86,15 @@ UdpConnectionBase::~UdpConnectionBase()
 class UdpConnection : public UdpConnectionBase
 {
 public:
-    UdpConnection(socket_t sockfd, void * user_data = nullptr);
+    UdpConnection(const sockaddr_in_t & host_address, const sockaddr_in_t & peer_address, socket_t sockfd, void * user_data, bool bound);
     virtual ~UdpConnection();
 
 public:
-    bool init(const FecConfiguration & fec);
-    void exit();
+    virtual bool init(const FecConfiguration & fec);
+    virtual void exit();
+
+public:
+    virtual bool is_listener();
 
 public:
     virtual void set_user_data(void * user_data) override;
@@ -96,38 +105,49 @@ public:
     virtual void get_peer_address(std::string & ip, unsigned short & port) override;
 
 public:
+    sockaddr_in_t & get_address();
     socket_t get_socket();
 
 public:
+    bool has_bound();
     bool use_fec();
 
 public:
     CauchyFecEncoder & get_fec_encoder();
     CauchyFecDecoder & get_fec_decoder();
 
-private:
-    socket_t                m_sockfd;
-    void                  * m_user_data;
+public:
+    void disable_socket();
+
+protected:
+    sockaddr_in_t                               m_host_address;
+    sockaddr_in_t                               m_peer_address;
 
 private:
-    std::string             m_host_ip;
-    std::string             m_peer_ip;
-    unsigned short          m_host_port;
-    unsigned short          m_peer_port;
+    socket_t                                    m_sockfd;
+    void                                      * m_user_data;
+    bool                                        m_bound;
 
 private:
-    bool                    m_use_fec;
-    CauchyFecEncoder        m_fec_encoder;
-    CauchyFecDecoder        m_fec_decoder;
+    std::string                                 m_host_ip;
+    std::string                                 m_peer_ip;
+    unsigned short                              m_host_port;
+    unsigned short                              m_peer_port;
+
+private:
+    bool                                        m_use_fec;
+    CauchyFecEncoder                            m_fec_encoder;
+    CauchyFecDecoder                            m_fec_decoder;
 };
 
-static bool udp_get_host_address(socket_t sockfd, sockaddr_in_t & address);
-static bool udp_get_peer_address(socket_t sockfd, sockaddr_in_t & address);
 static bool resolve_address(const sockaddr_in_t & address, std::string & ip, unsigned short & port);
 
-UdpConnection::UdpConnection(socket_t sockfd, void * user_data)
-    : m_sockfd(sockfd)
+UdpConnection::UdpConnection(const sockaddr_in_t & host_address, const sockaddr_in_t & peer_address, socket_t sockfd, void * user_data, bool bound)
+    : m_host_address(host_address)
+    , m_peer_address(peer_address)
+    , m_sockfd(sockfd)
     , m_user_data(user_data)
+    , m_bound(bound)
     , m_host_ip()
     , m_peer_ip()
     , m_host_port(0)
@@ -136,10 +156,6 @@ UdpConnection::UdpConnection(socket_t sockfd, void * user_data)
     , m_fec_encoder()
     , m_fec_decoder()
 {
-    sockaddr_in_t host_address;
-    sockaddr_in_t peer_address;
-    udp_get_host_address(sockfd, host_address);
-    udp_get_peer_address(sockfd, peer_address);
     resolve_address(host_address, m_host_ip, m_host_port);
     resolve_address(peer_address, m_peer_ip, m_peer_port);
 }
@@ -161,14 +177,22 @@ bool UdpConnection::init(const FecConfiguration & fec)
 
 void UdpConnection::exit()
 {
+    memset(&m_host_address, 0x0, sizeof(m_host_address));
+    memset(&m_peer_address, 0x0, sizeof(m_peer_address));
     m_sockfd = BAD_SOCKET;
     m_user_data = nullptr;
+    m_bound = false;
     m_fec_encoder.exit();
     m_fec_decoder.exit();
     m_host_ip.clear();
     m_peer_ip.clear();
     m_host_port = 0;
     m_peer_port = 0;
+}
+
+bool UdpConnection::is_listener()
+{
+    return (false);
 }
 
 void UdpConnection::set_user_data(void * user_data)
@@ -193,9 +217,19 @@ void UdpConnection::get_peer_address(std::string & ip, unsigned short & port)
     port = m_peer_port;
 }
 
+sockaddr_in_t & UdpConnection::get_address()
+{
+    return (m_peer_address);
+}
+
 socket_t UdpConnection::get_socket()
 {
     return (m_sockfd);
+}
+
+bool UdpConnection::has_bound()
+{
+    return (m_bound);
 }
 
 bool UdpConnection::use_fec()
@@ -211,6 +245,154 @@ CauchyFecEncoder & UdpConnection::get_fec_encoder()
 CauchyFecDecoder & UdpConnection::get_fec_decoder()
 {
     return (m_fec_decoder);
+}
+
+void UdpConnection::disable_socket()
+{
+    m_sockfd = BAD_SOCKET;
+}
+
+class UdpListener : public UdpConnection
+{
+public:
+    UdpListener(const sockaddr_in_t & host_address, bool one_to_one, socket_t sockfd, void * user_data);
+    virtual ~UdpListener();
+
+public:
+    virtual bool init(const FecConfiguration & fec) override;
+    virtual void exit() override;
+
+public:
+    virtual bool is_listener() override;
+
+public:
+    bool is_one_to_one();
+
+public:
+    const FecConfiguration & get_fec();
+
+public:
+    UdpConnection * get_connection(const sockaddr_in_t & address);
+    bool insert_connection(const sockaddr_in_t & address, UdpConnection * connection);
+    void remove_connection(UdpConnection * connection, UdpServiceBase * udp_service);
+    void clear_connections(UdpServiceBase * udp_service);
+
+public:
+    UdpConnection * create_connection();
+    void destroy_connection(UdpConnection * connection);
+
+private:
+    bool                                        m_one_to_one;
+    FecConfiguration                            m_fec_configuration;
+
+private:
+    std::map<sockaddr_in_t, UdpConnection *>    m_connection_map;
+    std::mutex                                  m_connection_mutex;
+};
+
+UdpListener::UdpListener(const sockaddr_in_t & host_address, bool one_to_one, socket_t sockfd, void * user_data)
+    : UdpConnection(host_address, host_address, sockfd, user_data, false)
+    , m_one_to_one(one_to_one)
+    , m_fec_configuration()
+    , m_connection_map()
+    , m_connection_mutex()
+{
+    memset(&m_fec_configuration, 0x0, sizeof(m_fec_configuration));
+}
+
+UdpListener::~UdpListener()
+{
+    exit();
+}
+
+bool UdpListener::init(const FecConfiguration & fec)
+{
+    m_fec_configuration = fec;
+    return (true);
+}
+
+void UdpListener::exit()
+{
+    clear_connections(nullptr);
+    m_one_to_one = false;
+    memset(&m_fec_configuration, 0x0, sizeof(m_fec_configuration));
+}
+
+bool UdpListener::is_listener()
+{
+    return (true);
+}
+
+bool UdpListener::is_one_to_one()
+{
+    return (m_one_to_one);
+}
+
+const FecConfiguration & UdpListener::get_fec()
+{
+    return (m_fec_configuration);
+}
+
+UdpConnection * UdpListener::create_connection()
+{
+    UdpConnection * connection = new UdpConnection(m_host_address, m_peer_address, get_socket(), get_user_data(), m_one_to_one);
+    if (nullptr != connection)
+    {
+        if (!connection->init(m_fec_configuration))
+        {
+            delete connection;
+            connection = nullptr;
+        }
+    }
+    return (connection);
+}
+
+void UdpListener::destroy_connection(UdpConnection * connection)
+{
+    if (nullptr != connection)
+    {
+        delete connection;
+        connection = nullptr;
+    }
+}
+
+UdpConnection * UdpListener::get_connection(const sockaddr_in_t & address)
+{
+    std::lock_guard<std::mutex> locker(m_connection_mutex);
+    std::map<sockaddr_in_t, UdpConnection *>::iterator iter = m_connection_map.find(address);
+    return (m_connection_map.end() != iter ? iter->second : nullptr);
+}
+
+bool UdpListener::insert_connection(const sockaddr_in_t & address, UdpConnection * connection)
+{
+    std::lock_guard<std::mutex> locker(m_connection_mutex);
+    return (m_connection_map.insert(std::make_pair(address, connection)).second);
+}
+
+void UdpListener::remove_connection(UdpConnection * connection, UdpServiceBase * udp_service)
+{
+    std::lock_guard<std::mutex> locker(m_connection_mutex);
+    m_connection_map.erase(connection->get_address());
+    if (nullptr != udp_service)
+    {
+        udp_service->on_close(connection);
+    }
+    destroy_connection(connection);
+}
+
+void UdpListener::clear_connections(UdpServiceBase * udp_service)
+{
+    std::lock_guard<std::mutex> locker(m_connection_mutex);
+    for (std::map<sockaddr_in_t, UdpConnection *>::iterator iter = m_connection_map.begin(); m_connection_map.end() != iter; ++iter)
+    {
+        UdpConnection * connection = iter->second;
+        if (nullptr != udp_service)
+        {
+            udp_service->on_close(connection);
+        }
+        destroy_connection(connection);
+    }
+    m_connection_map.clear();
 }
 
 #ifndef _MSC_VER
@@ -607,61 +789,161 @@ static bool udp_get_peer_address(socket_t sockfd, sockaddr_in_t & address)
     return (true);
 }
 
-static bool find_socket(std::mutex & connection_mutex, const std::map<sockaddr_in_t, UdpConnection *> & connection_map, const sockaddr_in_t & address, socket_t & sockfd)
+static bool find_socket(std::mutex & connection_mutex, std::list<UdpConnection *> & connection_list, const sockaddr_in_t & address, socket_t & sockfd)
 {
     std::lock_guard<std::mutex> locker(connection_mutex);
-    std::map<sockaddr_in_t, UdpConnection *>::const_iterator iter = connection_map.find(address);
-    if (connection_map.end() != iter)
+    for (std::list<UdpConnection *>::const_iterator iter = connection_list.begin(); connection_list.end() != iter; ++iter)
     {
-        sockfd = iter->second->get_socket();
-        return (true);
-    }
-    else
-    {
-        sockfd = BAD_SOCKET;
-        return (false);
-    }
-}
-
-static bool insert_connection(std::mutex & connection_mutex, std::map<sockaddr_in_t, UdpConnection *> & connection_map, const sockaddr_in_t & address, UdpConnection * connection)
-{
-    std::lock_guard<std::mutex> locker(connection_mutex);
-    if (connection_map.end() == connection_map.find(address))
-    {
-        connection_map[address] = connection;
-        return (true);
-    }
-    return (false);
-}
-
-static bool remove_connection(std::mutex & connection_mutex, std::map<sockaddr_in_t, UdpConnection *> & connection_map, UdpServiceBase * udp_service, UdpConnection * connection)
-{
-    std::lock_guard<std::mutex> locker(connection_mutex);
-    for (std::map<sockaddr_in_t, UdpConnection *>::iterator iter = connection_map.begin(); connection_map.end() != iter; ++iter)
-    {
-        if (iter->second->get_socket() == connection->get_socket())
+        UdpConnection * connection = *iter;
+        if (address == connection->get_address())
         {
-            udp_service->on_close(connection);
-            udp_close(connection->get_socket());
-            connection_map.erase(iter);
-            delete connection;
+            sockfd = connection->get_socket();
             return (true);
         }
     }
+    sockfd = BAD_SOCKET;
     return (false);
 }
 
-static void clear_connections(std::mutex & connection_mutex, std::map<sockaddr_in_t, UdpConnection *> & connection_map, UdpServiceBase * udp_service)
+static void insert_connection(std::mutex & connection_mutex, std::list<UdpConnection *> & connection_list, UdpConnection * connection)
 {
     std::lock_guard<std::mutex> locker(connection_mutex);
-    for (std::map<sockaddr_in_t, UdpConnection *>::iterator iter = connection_map.begin(); connection_map.end() != iter; ++iter)
+    if (connection->is_listener())
     {
-        UdpConnection * connection = iter->second;
-        udp_service->on_close(connection);
+        connection_list.push_front(connection);
+    }
+    else
+    {
+        connection_list.push_back(connection);
+    }
+}
+
+static bool remove_connection(std::mutex & connection_mutex, std::list<UdpConnection *> & connection_list, UdpConnection * connection, UdpServiceBase * udp_service)
+{
+    if (nullptr == connection || nullptr == udp_service)
+    {
+        return (false);
+    }
+    std::lock_guard<std::mutex> locker(connection_mutex);
+    for (std::list<UdpConnection *>::iterator iter = connection_list.begin(); connection_list.end() != iter; ++iter)
+    {
+        if (connection->is_listener())
+        {
+            if (connection != *iter)
+            {
+                continue;
+            }
+            UdpListener * listener = reinterpret_cast<UdpListener *>(connection);
+            listener->clear_connections(udp_service);
+        }
+        else if (connection->has_bound())
+        {
+            if (connection != *iter)
+            {
+                continue;
+            }
+            udp_service->on_close(connection);
+        }
+        else
+        {
+            if (!(*iter)->is_listener())
+            {
+                break;
+            }
+            if ((*iter)->get_socket() != connection->get_socket())
+            {
+                continue;
+            }
+            UdpListener * listener = reinterpret_cast<UdpListener *>(*iter);
+            listener->remove_connection(connection, udp_service);
+            return (true);
+        }
+        udp_close(connection->get_socket());
+        connection_list.erase(iter);
+        delete connection;
+        return (true);
+    }
+    return (false);
+}
+
+static void clear_connections(std::mutex & connection_mutex, std::list<UdpConnection *> & connection_list, UdpServiceBase * udp_service)
+{
+    std::lock_guard<std::mutex> locker(connection_mutex);
+    for (std::list<UdpConnection *>::iterator iter = connection_list.begin(); connection_list.end() != iter; ++iter)
+    {
+        UdpConnection * connection = *iter;
+        if (connection->is_listener())
+        {
+            UdpListener * listener = reinterpret_cast<UdpListener *>(connection);
+            listener->clear_connections(udp_service);
+        }
+        else
+        {
+            udp_service->on_close(connection);
+        }
         udp_close(connection->get_socket());
         delete connection;
     }
-    connection_map.clear();
+    connection_list.clear();
+}
+
+static UdpConnection * handle_connect_request(xactor_t xactor, std::mutex & connection_mutex, std::list<UdpConnection *> & connection_list, UdpListener * listener, UdpServiceBase * udp_service)
+{
+    if (BAD_XACTOR == xactor || nullptr == listener || nullptr == udp_service)
+    {
+        return (nullptr);
+    }
+
+    UdpConnection * connection = (listener->is_one_to_one() ? nullptr : listener->get_connection(listener->get_address()));
+    if (nullptr != connection)
+    {
+        udp_send(connection->get_socket(), connection->get_address(), nullptr, 0);
+        return (nullptr);
+    }
+
+    connection = listener->create_connection();
+    if (nullptr == connection)
+    {
+        return (nullptr);
+    }
+
+    if (!connection->init(listener->get_fec()))
+    {
+        listener->destroy_connection(connection);
+        return (nullptr);
+    }
+
+    if (!listener->is_one_to_one())
+    {
+        if (listener->insert_connection(listener->get_address(), connection))
+        {
+            udp_send(connection->get_socket(), connection->get_address(), nullptr, 0);
+            udp_service->on_listen(connection, connection->get_user_data());
+        }
+        else
+        {
+            listener->destroy_connection(connection);
+        }
+        return (nullptr);
+    }
+
+    if (!udp_connect(connection->get_socket(), connection->get_address()))
+    {
+        listener->destroy_connection(connection);
+        return (nullptr);
+    }
+
+    listener->disable_socket();
+
+    remove_connection(connection_mutex, connection_list, listener, udp_service);
+
+    insert_connection(connection_mutex, connection_list, connection);
+
+    udp_service->on_listen(connection, connection->get_user_data());
+
+    udp_send(connection->get_socket(), nullptr, 0);
+
+    return (connection);
 }
 
 static bool handle_recv_data(UdpConnection * connection, const void * data, std::size_t size, UdpServiceBase * udp_service)
@@ -675,6 +957,16 @@ static bool handle_recv_data(UdpConnection * connection, const void * data, std:
     if (BAD_SOCKET == sockfd)
     {
         return (false);
+    }
+
+    if (connection->is_listener())
+    {
+        UdpListener * listener = reinterpret_cast<UdpListener *>(connection);
+        connection = listener->get_connection(listener->get_address());
+        if (nullptr == connection)
+        {
+            return (false);
+        }
     }
 
     if (connection->use_fec())
@@ -701,7 +993,7 @@ static bool handle_recv_data(UdpConnection * connection, const void * data, std:
 
 static bool handle_send_data(UdpConnection * connection, const void * data, std::size_t size)
 {
-    if (nullptr == connection || nullptr == data)
+    if (nullptr == connection || connection->is_listener() || nullptr == data)
     {
         return (false);
     }
@@ -712,7 +1004,10 @@ static bool handle_send_data(UdpConnection * connection, const void * data, std:
         return (false);
     }
 
-    if (connection->use_fec())
+    const sockaddr_in_t & address = connection->get_address();
+    bool bound = connection->has_bound();
+
+    if (connection->use_fec() && 0 != size)
     {
         std::list<std::vector<uint8_t>> dst_list;
         CauchyFecEncoder & fec_encoder = connection->get_fec_encoder();
@@ -725,16 +1020,33 @@ static bool handle_send_data(UdpConnection * connection, const void * data, std:
         for (std::list<std::vector<uint8_t>>::const_iterator iter = dst_list.begin(); dst_list.end() != iter; ++iter)
         {
             const std::vector<uint8_t> & piece = *iter;
-            if (!udp_send(sockfd, reinterpret_cast<const char *>(&piece[0]), piece.size()))
+            if (bound)
             {
-                ret = false;
+                if (!udp_send(sockfd, reinterpret_cast<const char *>(&piece[0]), piece.size()))
+                {
+                    ret = false;
+                }
+            }
+            else
+            {
+                if (!udp_send(sockfd, address, reinterpret_cast<const char *>(&piece[0]), piece.size()))
+                {
+                    ret = false;
+                }
             }
         }
         return (ret);
     }
     else
     {
-        return (udp_send(sockfd, reinterpret_cast<const char *>(data), size));
+        if (bound)
+        {
+            return (udp_send(sockfd, reinterpret_cast<const char *>(data), size));
+        }
+        else
+        {
+            return (udp_send(sockfd, address, reinterpret_cast<const char *>(data), size));
+        }
     }
 }
 
@@ -822,12 +1134,28 @@ static bool post_recv(iocp_event_t * event)
     WSABUF buffer_array[1] = { event->data };
     DWORD recv_len = 0;
     DWORD recv_flg = 0;
-    if (SOCKET_ERROR == ::WSARecv(event->connection->get_socket(), buffer_array, 1, &recv_len, &recv_flg, &event->overlapped, nullptr))
+    if (event->connection->is_listener())
     {
-        if (WSA_IO_PENDING != net_error())
+        sockaddr_in_t & address = event->connection->get_address();
+        INT addr_len = sizeof(address);
+        if (SOCKET_ERROR == ::WSARecvFrom(event->connection->get_socket(), buffer_array, 1, &recv_len, &recv_flg, reinterpret_cast<sockaddr_t *>(&address), &addr_len, &event->overlapped, nullptr))
         {
-            RUN_LOG_ERR("post recv failed: %d", net_error());
-            return (false);
+            if (WSA_IO_PENDING != net_error())
+            {
+                RUN_LOG_ERR("post recv failed: %d", net_error());
+                return (false);
+            }
+        }
+    }
+    else
+    {
+        if (SOCKET_ERROR == ::WSARecv(event->connection->get_socket(), buffer_array, 1, &recv_len, &recv_flg, &event->overlapped, nullptr))
+        {
+            if (WSA_IO_PENDING != net_error())
+            {
+                RUN_LOG_ERR("post recv failed: %d", net_error());
+                return (false);
+            }
         }
     }
     return (true);
@@ -892,7 +1220,7 @@ static bool append_to_xactor(xactor_t xactor, UdpConnection * connection)
     return (false);
 }
 
-static void handle_recv(volatile bool & running, xactor_t xactor, std::mutex & connection_mutex, std::map<sockaddr_in_t, UdpConnection *> & connection_map, UdpServiceBase * udp_service)
+static void handle_recv(volatile bool & running, xactor_t xactor, std::mutex & connection_mutex, std::list<UdpConnection *> & connection_list, UdpServiceBase * udp_service)
 {
     while (running)
     {
@@ -911,13 +1239,38 @@ static void handle_recv(volatile bool & running, xactor_t xactor, std::mutex & c
             continue;
         }
 
+        const char * data = event->buffer;
+        UdpConnection * connection = event->connection;
+
         if (good)
         {
-            if (nullptr != event->connection && 0 != data_len)
+            if (nullptr != connection)
             {
-                handle_recv_data(event->connection, event->buffer, data_len, udp_service);
+                if (0 == data_len)
+                {
+                    if (connection->is_listener())
+                    {
+                        UdpConnection * new_connection = handle_connect_request(xactor, connection_mutex, connection_list, reinterpret_cast<UdpListener *>(connection), udp_service);
+                        if (nullptr != new_connection)
+                        {
+                            event->connection = new_connection;
+                            connection = new_connection;
+                        }
+                    }
+                    else
+                    {
+                        udp_send(connection->get_socket(), nullptr, 0);
+                    }
+                }
+                else
+                {
+                    handle_recv_data(connection, data, data_len, udp_service);
+                }
             }
-            good = post_recv(event);
+            if (good)
+            {
+                good = post_recv(event);
+            }
         }
 
         if (!good)
@@ -926,7 +1279,7 @@ static void handle_recv(volatile bool & running, xactor_t xactor, std::mutex & c
             {
                 RUN_LOG_ERR("iocp error: %d", net_error());
             }
-            remove_connection(connection_mutex, connection_map, udp_service, event->connection);
+            remove_connection(connection_mutex, connection_list, connection, udp_service);
             destroy_event(event);
         }
     }
@@ -1018,7 +1371,7 @@ static bool append_to_xactor(xactor_t xactor, UdpConnection * connection)
     return (append_to_epoll(xactor, connection));
 }
 
-static void handle_recv(volatile bool & running, xactor_t xactor, std::mutex & connection_mutex, std::map<sockaddr_in_t, UdpConnection *> & connection_map, UdpServiceBase * udp_service)
+static void handle_recv(volatile bool & running, xactor_t xactor, std::mutex & connection_mutex, std::list<UdpConnection *> & connection_list, UdpServiceBase * udp_service)
 {
     struct epoll_event event_array[256];
     const std::size_t max_event_count = sizeof(event_array) / sizeof(event_array[0]);
@@ -1058,19 +1411,47 @@ static void handle_recv(volatile bool & running, xactor_t xactor, std::mutex & c
             {
                 char buffer[1600] = { 0x0 };
                 std::size_t recv_size = 0;
-                if (udp_recv(connection->get_socket(), buffer, sizeof(buffer), recv_size) && 0 != recv_size)
+                if (connection->is_listener())
                 {
-                    handle_recv_data(connection, buffer, recv_size, udp_service);
+                    if (udp_recv(connection->get_socket(), connection->get_address(), buffer, sizeof(buffer), recv_size))
+                    {
+                        if (0 == recv_size)
+                        {
+                            UdpConnection * new_connection = handle_connect_request(xactor, connection_mutex, connection_list, reinterpret_cast<UdpListener *>(connection), udp_service);
+                            if (nullptr != new_connection)
+                            {
+                                connection = new_connection;
+                            }
+                        }
+                        else
+                        {
+                            handle_recv_data(connection, buffer, recv_size, udp_service);
+                        }
+                    }
                 }
-                if (!post_recv(xactor, connection))
+                else
                 {
-                    good = false;
+                    if (udp_recv(connection->get_socket(), buffer, sizeof(buffer), recv_size))
+                    {
+                        if (0 == recv_size)
+                        {
+                            udp_send(connection->get_socket(), nullptr, 0);
+                        }
+                        else
+                        {
+                            handle_recv_data(connection, buffer, recv_size, udp_service);
+                        }
+                    }
+                }
+                if (good)
+                {
+                    good = post_recv(xactor, connection);
                 }
             }
             if (!good)
             {
                 delete_from_epoll(xactor, connection);
-                remove_connection(connection_mutex, connection_map, udp_service, connection);
+                remove_connection(connection_mutex, connection_list, connection, udp_service);
             }
         }
     }
@@ -1090,29 +1471,35 @@ public:
     ~UdpManagerImpl();
 
 public:
-    bool init(UdpServiceBase * udp_service, const FecConfiguration * fec, std::size_t thread_count, const char * host_ip, unsigned short host_port, bool reuse_addr, bool reuse_port);
+    bool init(UdpServiceBase * udp_service, const FecConfiguration * fec, std::size_t thread_count);
     void exit();
 
 public:
+    bool listen(const char * host_ip, unsigned short host_port, void * user_data, bool one_to_one, bool reuse_addr, bool reuse_port);
+    bool accept(const char * host_ip, unsigned short host_port, void * user_data, bool reuse_addr, bool reuse_port);
     bool connect(const char * peer_ip, unsigned short peer_port, void * user_data, const char * host_ip, unsigned short host_port, bool reuse_addr, bool reuse_port);
     bool send(UdpConnectionBase * connection, const void * data, std::size_t size);
     bool close(UdpConnectionBase * connection);
 
 private:
-    void accept();
+    void do_accept(socket_t listener, void * user_data);
 
 private:
     volatile bool                                       m_running;
     FecConfiguration                                    m_fec;
     xactor_t                                            m_xactor;
-    UdpServiceBase                                    * m_service;
-    sockaddr_in_t                                       m_address;
-    socket_t                                            m_listener;
-    std::thread                                         m_listen_thread;
+    UdpServiceBase                                    * m_udp_service;
+
+private:
+    std::list<sockaddr_in_t>                            m_accept_addresses;
+    std::list<std::thread>                              m_accept_threads;
+    std::mutex                                          m_accept_mutex;
+
+private:
     std::vector<std::thread>                            m_recv_threads;
 
 private:
-    std::map<sockaddr_in_t, UdpConnection *>            m_connection_map;
+    std::list<UdpConnection *>                          m_connection_list;
     std::mutex                                          m_connection_mutex;
 };
 
@@ -1120,16 +1507,15 @@ UdpManagerImpl::UdpManagerImpl()
     : m_running(false)
     , m_fec()
     , m_xactor(BAD_XACTOR)
-    , m_service(nullptr)
-    , m_address()
-    , m_listener(BAD_SOCKET)
-    , m_listen_thread()
+    , m_udp_service(nullptr)
+    , m_accept_addresses()
+    , m_accept_threads()
+    , m_accept_mutex()
     , m_recv_threads()
-    , m_connection_map()
+    , m_connection_list()
     , m_connection_mutex()
 {
     memset(&m_fec, 0x0, sizeof(m_fec));
-    memset(&m_address, 0x0, sizeof(m_address));
 }
 
 UdpManagerImpl::~UdpManagerImpl()
@@ -1137,7 +1523,7 @@ UdpManagerImpl::~UdpManagerImpl()
     exit();
 }
 
-bool UdpManagerImpl::init(UdpServiceBase * udp_service, const FecConfiguration * fec, std::size_t thread_count, const char * host_ip, unsigned short host_port, bool reuse_addr, bool reuse_port)
+bool UdpManagerImpl::init(UdpServiceBase * udp_service, const FecConfiguration * fec, std::size_t thread_count)
 {
     exit();
 
@@ -1154,7 +1540,7 @@ bool UdpManagerImpl::init(UdpServiceBase * udp_service, const FecConfiguration *
         return (false);
     }
 
-    m_service = udp_service;
+    m_udp_service = udp_service;
 
     if (!init_network())
     {
@@ -1166,23 +1552,6 @@ bool UdpManagerImpl::init(UdpServiceBase * udp_service, const FecConfiguration *
     {
         RUN_LOG_ERR("udp manager init failure while create xactor failed");
         return (false);
-    }
-
-    if (nullptr != host_ip && 0 != host_port)
-    {
-        if (!udp_bind(m_listener, host_ip, host_port, reuse_addr, reuse_port))
-        {
-            RUN_LOG_ERR("udp manager init failure while udp bind failed");
-            return (false);
-        }
-
-        if (!udp_get_host_address(m_listener, m_address))
-        {
-            RUN_LOG_ERR("udp manager init failure while udp get host address failed");
-            return (false);
-        }
-
-        m_listen_thread = std::thread(&UdpManagerImpl::accept, this);
     }
 
 #ifdef _MSC_VER
@@ -1201,7 +1570,13 @@ bool UdpManagerImpl::init(UdpServiceBase * udp_service, const FecConfiguration *
     m_recv_threads.reserve(thread_count);
     for (std::size_t thread_index = 0; thread_index < thread_count; ++thread_index)
     {
-        m_recv_threads.emplace_back(std::thread(std::bind(&handle_recv, std::ref(m_running), std::ref(m_xactor), std::ref(m_connection_mutex), std::ref(m_connection_map), m_service)));
+        std::thread recv_thread(&handle_recv, std::ref(m_running), std::ref(m_xactor), std::ref(m_connection_mutex), std::ref(m_connection_list), m_udp_service);
+        if (!recv_thread.joinable())
+        {
+            RUN_LOG_ERR("udp manager init failure while create recv thread failed");
+            return (false);
+        }
+        m_recv_threads.emplace_back(std::move(recv_thread));
     }
 
     return (true);
@@ -1213,24 +1588,29 @@ void UdpManagerImpl::exit()
     {
         m_running = false;
 
-        if (BAD_SOCKET != m_listener)
         {
-            std::string host_ip;
-            unsigned short host_port = 0;
-            resolve_address(m_address, host_ip, host_port);
-            socket_t sockfd = BAD_SOCKET;
-            udp_connect(sockfd, "0.0.0.0" == host_ip ? "127.0.0.1" : host_ip.c_str(), host_port, nullptr, 0, false, false);
-            udp_send(sockfd, nullptr, 0);
-            udp_close(sockfd);
-            sockfd = BAD_SOCKET;
-
-            if (m_listen_thread.joinable())
+            std::lock_guard<std::mutex> locker(m_accept_mutex);
+            if (!m_accept_threads.empty())
             {
-                m_listen_thread.join();
-            }
+                socket_t sockfd = BAD_SOCKET;
+                if (udp_open(sockfd))
+                {
+                    for (std::list<sockaddr_in_t>::const_iterator iter = m_accept_addresses.begin(); m_accept_addresses.end() != iter; ++iter)
+                    {
+                        const sockaddr_in_t & accept_address = *iter;
+                        udp_send(sockfd, accept_address, nullptr, 0);
+                    }
+                    m_accept_addresses.clear();
+                    udp_close(sockfd);
+                    sockfd = BAD_SOCKET;
+                }
 
-            udp_close(m_listener);
-            m_listener = BAD_SOCKET;
+                for (std::list<std::thread>::iterator iter = m_accept_threads.begin(); m_accept_threads.end() != iter; ++iter)
+                {
+                    iter->join();
+                }
+                m_accept_threads.clear();
+            }
         }
 
         destroy_xactor(m_xactor, m_recv_threads.size());
@@ -1241,22 +1621,137 @@ void UdpManagerImpl::exit()
         }
         m_recv_threads.clear();
 
-        clear_connections(m_connection_mutex, m_connection_map, m_service);
+        clear_connections(m_connection_mutex, m_connection_list, m_udp_service);
 
         memset(&m_fec, 0x0, sizeof(m_fec));
-        m_service = nullptr;
+        m_udp_service = nullptr;
 
         exit_network();
     }
 }
 
-void UdpManagerImpl::accept()
+bool UdpManagerImpl::listen(const char * host_ip, unsigned short host_port, void * user_data, bool one_to_one, bool reuse_addr, bool reuse_port)
+{
+    if (!m_running || nullptr == m_udp_service)
+    {
+        return (false);
+    }
+
+    if (nullptr == host_ip)
+    {
+        host_ip = "0.0.0.0";
+    }
+
+    if (0 == host_port)
+    {
+        return (false);
+    }
+
+    socket_t acceptor = BAD_SOCKET;
+    if (!udp_bind(acceptor, host_ip, host_port, reuse_addr, reuse_port))
+    {
+        return (false);
+    }
+
+    UdpListener * listener = nullptr;
+
+    do
+    {
+        if (!udp_set_block_switch(acceptor, false))
+        {
+            break;
+        }
+
+        sockaddr_in_t host_address = { 0x0 };
+        if (!udp_get_host_address(acceptor, host_address))
+        {
+            break;
+        }
+
+        listener = new UdpListener(host_address, one_to_one, acceptor, user_data);
+        if (nullptr == listener)
+        {
+            break;
+        }
+
+        if (!listener->init(m_fec))
+        {
+            break;
+        }
+
+        insert_connection(m_connection_mutex, m_connection_list, listener);
+
+        if (!append_to_xactor(m_xactor, listener))
+        {
+            remove_connection(m_connection_mutex, m_connection_list, listener, m_udp_service);
+            return (false);
+        }
+
+        return (true);
+    } while (false);
+
+    if (nullptr != listener)
+    {
+        delete listener;
+        listener = nullptr;
+    }
+
+    udp_close(acceptor);
+    acceptor = BAD_SOCKET;
+
+    return (false);
+}
+
+bool UdpManagerImpl::accept(const char * host_ip, unsigned short host_port, void * user_data, bool reuse_addr, bool reuse_port)
+{
+    if (!m_running || nullptr == m_udp_service)
+    {
+        return (false);
+    }
+
+    if (nullptr == host_ip)
+    {
+        host_ip = "0.0.0.0";
+    }
+
+    if (0 == host_port)
+    {
+        return (false);
+    }
+
+    socket_t listener = BAD_SOCKET;
+    if (!udp_bind(listener, host_ip, host_port, reuse_addr, reuse_port))
+    {
+        return (false);
+    }
+
+    sockaddr_in_t host_address = { 0x0 };
+    if (!udp_get_host_address(listener, host_address))
+    {
+        return (false);
+    }
+
+    {
+        std::lock_guard<std::mutex> locker(m_accept_mutex);
+        std::thread accept_thread(&UdpManagerImpl::do_accept, this, listener, user_data);
+        if (!accept_thread.joinable())
+        {
+            return (false);
+        }
+        m_accept_addresses.push_back(host_address);
+        m_accept_threads.emplace_back(std::move(accept_thread));
+    }
+
+    return (true);
+}
+
+void UdpManagerImpl::do_accept(socket_t listener, void * user_data)
 {
     while (m_running)
     {
         sockaddr_in_t recv_address = { 0x0 };
         std::size_t recv_size = 0;
-        if (!udp_recv(m_listener, recv_address, nullptr, 0, recv_size))
+        if (!udp_recv(listener, recv_address, nullptr, 0, recv_size))
         {
             continue;
         }
@@ -1267,17 +1762,13 @@ void UdpManagerImpl::accept()
         }
 
         socket_t connector = BAD_SOCKET;
-        if (find_socket(m_connection_mutex, m_connection_map, recv_address, connector))
+        if (find_socket(m_connection_mutex, m_connection_list, recv_address, connector))
         {
             udp_send(connector, nullptr, 0);
             continue;
         }
 
-#ifdef _MSC_VER
         if (!udp_open(connector))
-#else
-        if (!udp_bind(connector, m_address, true, true))
-#endif // _MSC_VER
         {
             continue;
         }
@@ -1306,8 +1797,13 @@ void UdpManagerImpl::accept()
                 break;
             }
             */
+            sockaddr_in_t host_address = { 0x0 };
+            if (!udp_get_host_address(connector, host_address))
+            {
+                break;
+            }
 
-            connection = new UdpConnection(connector);
+            connection = new UdpConnection(host_address, recv_address, connector, user_data, true);
             if (nullptr == connection)
             {
                 break;
@@ -1318,16 +1814,13 @@ void UdpManagerImpl::accept()
                 break;
             }
 
-            if (!insert_connection(m_connection_mutex, m_connection_map, recv_address, connection))
-            {
-                break;
-            }
+            insert_connection(m_connection_mutex, m_connection_list, connection);
 
-            m_service->on_accept(connection);
+            m_udp_service->on_accept(connection, connection->get_user_data());
 
             if (!append_to_xactor(m_xactor, connection))
             {
-                remove_connection(m_connection_mutex, m_connection_map, m_service, connection);
+                remove_connection(m_connection_mutex, m_connection_list, connection, m_udp_service);
             }
 
             connection = nullptr;
@@ -1347,7 +1840,7 @@ void UdpManagerImpl::accept()
 
 bool UdpManagerImpl::connect(const char * peer_ip, unsigned short peer_port, void * user_data, const char * host_ip, unsigned short host_port, bool reuse_addr, bool reuse_port)
 {
-    if (!m_running || nullptr == m_service)
+    if (!m_running || nullptr == m_udp_service)
     {
         return (false);
     }
@@ -1415,7 +1908,7 @@ bool UdpManagerImpl::connect(const char * peer_ip, unsigned short peer_port, voi
             break;
         }
 
-        connection = new UdpConnection(connector, user_data);
+        connection = new UdpConnection(host_address, recv_address, connector, user_data, true);
         if (nullptr == connection)
         {
             break;
@@ -1426,16 +1919,13 @@ bool UdpManagerImpl::connect(const char * peer_ip, unsigned short peer_port, voi
             break;
         }
 
-        if (!insert_connection(m_connection_mutex, m_connection_map, host_address, connection))
-        {
-            break;
-        }
+        insert_connection(m_connection_mutex, m_connection_list, connection);
 
-        m_service->on_connect(connection, user_data);
+        m_udp_service->on_connect(connection, user_data);
 
         if (!append_to_xactor(m_xactor, connection))
         {
-            remove_connection(m_connection_mutex, m_connection_map, m_service, connection);
+            remove_connection(m_connection_mutex, m_connection_list, connection, m_udp_service);
             return (false);
         }
 
@@ -1461,7 +1951,7 @@ bool UdpManagerImpl::send(UdpConnectionBase * connection, const void * data, std
 
 bool UdpManagerImpl::close(UdpConnectionBase * connection)
 {
-    return (nullptr != connection && remove_connection(m_connection_mutex, m_connection_map, m_service, reinterpret_cast<UdpConnection *>(connection)));
+    return (nullptr != connection && remove_connection(m_connection_mutex, m_connection_list, reinterpret_cast<UdpConnection *>(connection), m_udp_service));
 }
 
 UdpManager::UdpManager()
@@ -1475,7 +1965,7 @@ UdpManager::~UdpManager()
     exit();
 }
 
-bool UdpManager::init(UdpServiceBase * udp_service, const FecConfiguration * fec, std::size_t thread_count, const char * host_ip, unsigned short host_port, bool reuse_addr, bool reuse_port)
+bool UdpManager::init(UdpServiceBase * udp_service, const FecConfiguration * fec, std::size_t thread_count)
 {
     if (nullptr == udp_service)
     {
@@ -1493,7 +1983,7 @@ bool UdpManager::init(UdpServiceBase * udp_service, const FecConfiguration * fec
         return (false);
     }
 
-    if (m_manager_impl->init(udp_service, fec, thread_count, host_ip, host_port, reuse_addr, reuse_port))
+    if (m_manager_impl->init(udp_service, fec, thread_count))
     {
         return (true);
     }
@@ -1512,6 +2002,16 @@ void UdpManager::exit()
         delete m_manager_impl;
         m_manager_impl = nullptr;
     }
+}
+
+bool UdpManager::listen(const char * host_ip, unsigned short host_port, void * user_data, bool one_to_one, bool reuse_addr, bool reuse_port)
+{
+    return (nullptr != m_manager_impl && m_manager_impl->listen(host_ip, host_port, user_data, one_to_one, reuse_addr, reuse_port));
+}
+
+bool UdpManager::accept(const char * host_ip, unsigned short host_port, void * user_data, bool reuse_addr, bool reuse_port)
+{
+    return (nullptr != m_manager_impl && m_manager_impl->accept(host_ip, host_port, user_data, reuse_addr, reuse_port));
 }
 
 bool UdpManager::connect(const char * peer_ip, unsigned short peer_port, void * user_data, const char * host_ip, unsigned short host_port, bool reuse_addr, bool reuse_port)

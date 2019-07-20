@@ -34,7 +34,7 @@ UdpTestServer::~UdpTestServer()
     exit();
 }
 
-bool UdpTestServer::init(const char * ip, uint16_t port, uint16_t thread_count, bool use_fec, bool send_back)
+bool UdpTestServer::init(const char * ip, uint16_t port, uint16_t thread_count, bool use_fec, bool send_back, bool use_listen)
 {
     exit();
 
@@ -55,10 +55,33 @@ bool UdpTestServer::init(const char * ip, uint16_t port, uint16_t thread_count, 
             m_fec.fec_decode_expire_millisecond = 15;
         }
 
-        if (!m_manager.init(this, use_fec ? &m_fec : nullptr, thread_count, ip, port, true, true))
+        if (use_listen)
         {
-            std::cout << "udp test server init failure while udp manager init failed" << std::endl;
-            break;
+            if (!m_manager.init(this, use_fec ? &m_fec : nullptr, thread_count))
+            {
+                std::cout << "udp test server init failure while udp manager init failed" << std::endl;
+                break;
+            }
+
+            if (!m_manager.listen(ip, port, nullptr, false, true, true))
+            {
+                std::cout << "udp test server init failure while udp manager listen failed" << std::endl;
+                break;
+            }
+        }
+        else
+        {
+            if (!m_manager.init(this, use_fec ? &m_fec : nullptr, thread_count))
+            {
+                std::cout << "udp test server init failure while udp manager init failed" << std::endl;
+                break;
+            }
+
+            if (!m_manager.accept(ip, port, nullptr, true, true))
+            {
+                std::cout << "udp test server init failure while udp manager accept failed" << std::endl;
+                break;
+            }
         }
 
         std::cout << "udp test server init success" << std::endl;
@@ -84,12 +107,20 @@ void UdpTestServer::exit()
     }
 }
 
-void UdpTestServer::on_accept(UdpXactor::UdpConnectionBase * connection)
+void UdpTestServer::on_listen(UdpXactor::UdpConnectionBase * connection, void * user_data)
 {
     std::lock_guard<std::mutex> locker(m_user_data_mutex);
     session_data_t & session_data = m_user_data_map[connection];
     session_data.user_data = ++m_session_index;
-    std::cout << "connection [" << session_data.user_data << "] incoming" << std::endl;
+    std::cout << "connection [" << session_data.user_data << "] incoming from listen" << std::endl;
+}
+
+void UdpTestServer::on_accept(UdpXactor::UdpConnectionBase * connection, void * user_data)
+{
+    std::lock_guard<std::mutex> locker(m_user_data_mutex);
+    session_data_t & session_data = m_user_data_map[connection];
+    session_data.user_data = ++m_session_index;
+    std::cout << "connection [" << session_data.user_data << "] incoming from accept" << std::endl;
 }
 
 void UdpTestServer::on_connect(UdpXactor::UdpConnectionBase * connection, void * user_data)
