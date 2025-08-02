@@ -1,10 +1,10 @@
 /********************************************************
  * Description : udp client main
- * Author      : ryan
- * Email       : ryan@rayvision.com
+ * Author      : yanrk
+ * Email       : yanrkchina@163.com
  * Version     : 1.0
  * History     :
- * Copyright(C): RAYVISION
+ * Copyright(C): 2025
  ********************************************************/
 
 #include <string>
@@ -17,7 +17,7 @@ int main(int, char * [])
 
     if (!client.init("127.0.0.1", 54321, 1, 1, true))
     {
-        return (1);
+        return 1;
     }
 
     while (true)
@@ -34,5 +34,5 @@ int main(int, char * [])
 
     client.exit();
 
-    return (0);
+    return 0;
 }

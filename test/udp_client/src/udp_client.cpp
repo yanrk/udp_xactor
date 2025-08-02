@@ -1,10 +1,10 @@
 /********************************************************
  * Description : udp client
- * Author      : ryan
- * Email       : ryan@rayvision.com
+ * Author      : yanrk
+ * Email       : yanrkchina@163.com
  * Version     : 1.0
  * History     :
- * Copyright(C): RAYVISION
+ * Copyright(C): 2025
  ********************************************************/
 
 #include <ctime>
@@ -75,13 +75,13 @@ bool UdpTestClient::init(const char * peer_ip, unsigned short peer_port, std::si
 
         std::cout << "udp test client init success" << std::endl;
 
-        return (true);
+        return true;
 
     } while (false);
 
     exit();
 
-    return (false);
+    return false;
 }
 
 void UdpTestClient::exit()
@@ -196,7 +196,7 @@ bool UdpTestClient::send_data(UdpXactor::UdpConnectionBase * connection)
 
     if (nullptr == session_data)
     {
-        return (false);
+        return false;
     }
 
     char data[1400] = { 0x0 };
@@ -219,7 +219,7 @@ bool UdpTestClient::send_data(UdpXactor::UdpConnectionBase * connection)
         m_user_data_map.erase(connection);
     }
 
-    return (true);
+    return true;
 }
 
 bool UdpTestClient::recv_data(UdpXactor::UdpConnectionBase * connection, const void * data, std::size_t size)
@@ -232,12 +232,12 @@ bool UdpTestClient::recv_data(UdpXactor::UdpConnectionBase * connection, const v
 
     if (nullptr == session_data)
     {
-        return (false);
+        return false;
     }
 
     session_data->recv_speed.count += 1;
 
     calc_speed(session_data->user_data, session_data->recv_speed, true, size, m_user_data_mutex);
 
-    return (true);
+    return true;
 }

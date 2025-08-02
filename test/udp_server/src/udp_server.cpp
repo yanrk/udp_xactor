@@ -1,10 +1,10 @@
 /********************************************************
  * Description : udp server
- * Author      : ryan
- * Email       : ryan@rayvision.com
+ * Author      : yanrk
+ * Email       : yanrkchina@163.com
  * Version     : 1.0
  * History     :
- * Copyright(C): RAYVISION
+ * Copyright(C): 2025
  ********************************************************/
 
 #include <cstring>
@@ -86,13 +86,13 @@ bool UdpTestServer::init(const char * ip, uint16_t port, uint16_t thread_count, 
 
         std::cout << "udp test server init success" << std::endl;
 
-        return (true);
+        return true;
 
     } while (false);
 
     exit();
 
-    return (false);
+    return false;
 }
 
 void UdpTestServer::exit()
@@ -200,19 +200,19 @@ bool UdpTestServer::send_data(UdpXactor::UdpConnectionBase * connection, const v
 
     if (nullptr == session_data)
     {
-        return (false);
+        return false;
     }
 
     if (!m_manager.send(connection, data, size))
     {
-        return (false);
+        return false;
     }
 
     session_data->send_speed.count += 1;
 
     calc_speed(session_data->user_data, session_data->send_speed, false, size, m_user_data_mutex);
 
-    return (true);
+    return true;
 }
 
 bool UdpTestServer::recv_data(UdpXactor::UdpConnectionBase * connection, const void * data, std::size_t size)
@@ -225,7 +225,7 @@ bool UdpTestServer::recv_data(UdpXactor::UdpConnectionBase * connection, const v
 
     if (nullptr == session_data)
     {
-        return (false);
+        return false;
     }
 
     if (nullptr != data && 0 != size)
@@ -240,5 +240,5 @@ bool UdpTestServer::recv_data(UdpXactor::UdpConnectionBase * connection, const v
         send_data(connection, data, size);
     }
 
-    return (true);
+    return true;
 }

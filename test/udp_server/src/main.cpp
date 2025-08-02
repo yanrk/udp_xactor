@@ -1,10 +1,10 @@
 /********************************************************
  * Description : udp server main
- * Author      : ryan
- * Email       : ryan@rayvision.com
+ * Author      : yanrk
+ * Email       : yanrkchina@163.com
  * Version     : 1.0
  * History     :
- * Copyright(C): RAYVISION
+ * Copyright(C): 2025
  ********************************************************/
 
 #include <string>
@@ -16,7 +16,7 @@ int main(int, char * [])
     UdpTestServer server;
     if (!server.init("0.0.0.0", 54321, 1, true, true, true))
     {
-        return (1);
+        return 1;
     }
 
     while (true)
@@ -33,5 +33,5 @@ int main(int, char * [])
 
     server.exit();
 
-    return (0);
+    return 0;
 }
